@@ -23,12 +23,14 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QComboBox,
+    QLineEdit,
+    QPushButton,
+    QLabel
 )
 
 from app.models.execution import Execution, GENERATED_YAML, TEMPLATE_PATH
 from app.models.rinex_extractor import RinexExtractor
-from app.utils.download_products import download_ppp_products
-
+from app.utils.cddis_credentials import save_earthdata_credentials
 
 class InputController(QObject):
     """
@@ -106,6 +108,16 @@ class InputController(QObject):
         self.ui.showConfigButton.clicked.connect(self.on_show_config)
         self.ui.showConfigButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.ui.processButton.clicked.connect(self.on_run_pea)
+
+        # CDDIS Credentials button
+        self.ui.cddisCredentialsButton.clicked.connect(self._open_cddis_credentials_dialog)
+
+
+
+    def _open_cddis_credentials_dialog(self):
+        """ Open the CDDIS Credential Input Dialog Box """
+        dialog = CredentialsDialog(self.parent)
+        dialog.exec()
 
     #region File Selection + Metadata Extraction
 
@@ -443,6 +455,7 @@ class InputController(QObject):
             999_999,
         )
         if ok:
+            # Keep "X s" to match RNX metadata format and existing parsing in MainController
             text = f"{val} s"
             self.ui.dataIntervalButton.setText(text)
             self.ui.dataIntervalValue.setText(f"{val} s")
@@ -622,6 +635,14 @@ class InputController(QObject):
             )
             return
 
+        if not getattr(self, "config_path", None):
+            QMessageBox.warning(
+                None,
+                "No config file",
+                "Please click Show config and select a YAML file first."
+            )
+            return
+        
         # just for sprint 4 exhibition
         # self.ui.terminalTextEdit.clear()
         # self.ui.terminalTextEdit.append("Basic validation passed, starting PEA execution...")
@@ -633,9 +654,9 @@ class InputController(QObject):
         except Exception as e:
             self.ui.terminalTextEdit.append(f"⚠️ PPP products download failed: {e}")
             self.ui.terminalTextEdit.append("Continuing without PPP products...")
-        
+
         self.pea_ready.emit()
-        
+
         # Ignore PEA execution, TODO: need backend to repair configuration problems
         try:
             self.execution.execute_config()
@@ -666,7 +687,7 @@ class InputController(QObject):
         path, _ = QFileDialog.getOpenFileName(
             parent, 
             "Select RINEX Observation File", 
-            f"{Path(__file__).parent.parent.parent / 'tests' / 'resources' / 'inputData' / 'data'}",
+            "", 
             "RINEX Observation Files (*.rnx *.rnx.gz);;All Files (*.*)"
         )
         return path or ""
@@ -674,10 +695,7 @@ class InputController(QObject):
     @staticmethod
     def _select_output_dir(parent) -> str:
         """Select output directory using file dialog"""
-        path = QFileDialog.getExistingDirectory(
-            parent,
-            "Select Output Directory",
-            f"{Path(__file__).parent.parent.parent / 'tests' / 'resources' / 'outputData'}")
+        path = QFileDialog.getExistingDirectory(parent, "Select Output Directory")
         return path or ""
 
     @staticmethod
@@ -768,3 +786,52 @@ class InputController(QObject):
         return ["RAP", "ULT", "FIN"]
 
     #endregion
+
+
+class CredentialsDialog(QDialog):
+    """ Credentials, pop-up window """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("CDDIS Credentials")
+
+        layout = QVBoxLayout()
+
+        # Username
+        layout.addWidget(QLabel("Username:"))
+        self.username_input = QLineEdit()
+        layout.addWidget(self.username_input)
+
+        # Password
+        layout.addWidget(QLabel("Password:"))
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.password_input)
+
+        # Confirm button
+        self.confirm_button = QPushButton("Save")
+        self.confirm_button.clicked.connect(self.save_credentials)
+        layout.addWidget(self.confirm_button)
+
+        self.setLayout(layout)
+
+    def save_credentials(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text().strip()
+
+        if not username or not password:
+            QMessageBox.warning(self, "Error", "Username and password cannot be empty")
+            return
+
+        # ✅ Save correctly in one go (Windows will write both %USERPROFILE%\\.netrc and %USERPROFILE%\\_netrc;
+        #    macOS/Linux will write ~/.netrc and automatically chmod 600; both URS and CDDIS entries are written)
+        try:
+            paths = save_earthdata_credentials(username, password)
+        except Exception as e:
+            QMessageBox.critical(self, "Save failed", f"❌ Failed to save credentials:\n{e}")
+            return
+
+        QMessageBox.information(self, "Success",
+                                "✅ Credentials saved to:\n" + "\n".join(str(p) for p in paths))
+        self.accept()
+
+
