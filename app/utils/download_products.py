@@ -11,7 +11,7 @@ def download_ppp_products(inputs) -> bool:
     start_datetime  = inputs.start_epoch.replace(" ", "_")
     end_datetime    = inputs.end_epoch.replace(" ", "_")
 
-    cddis = CDDIS_Handler(end_datetime)
+    cddis = CDDIS_Handler(start_datetime, end_datetime)
 
     analysis_center = inputs.ppp_provider.upper()
     project_type, solution_type = cddis.get_optimal_project_solution_tuple(analysis_center)

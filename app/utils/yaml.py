@@ -3,6 +3,7 @@ from pathlib import Path
 
 yaml = YAML() # Create the parser instance
 yaml.preserve_quotes = True # Do not remove quotes around values
+yaml.width = 4096
 yaml.indent(mapping=4, sequence=4, offset=4) # Preserve indenting through the file
 
 def load_yaml(file_path: str) -> dict:
