@@ -35,7 +35,85 @@ import ftplib
 import os
 from ftplib import FTP_TLS
 from app.utils.gn_functions import GPSDate
+import requests
+from bs4 import BeautifulSoup
+import netrc
+import platform
 
+BASE_URL = "https://cddis.nasa.gov/archive"
+
+def validate_netrc(machine="urs.earthdata.nasa.gov") -> tuple[bool, str]:
+    """
+    runs checks on the .netrc file to make sure it's valid
+
+    :param machine: The target credentials to use defaulted to urs.earthdata.nasa.gov
+    :returns (bool,str): If returns true then string will be empty. If false string will contain error message 
+    """
+    if platform.system() == "Windows":
+        netrc_path = Path.home() / "_netrc"
+    else: # will assume linux 
+        netrc_path = Path.home() / ".netrc"
+
+    if not netrc_path.exists():
+        #(f".netrc wasn't found at {netrc_path}")
+        return False, (f".netrc wasn't found at {netrc_path}")
+    try:
+        credentials = netrc.netrc(netrc_path).authenticators(machine)
+        if credentials is None:
+            #print(f"EarthData registration: https://urs.earthdata.nasa.gov/users/new")
+            #print(f"Instructions for creating .netrc file: https://cddis.nasa.gov/Data_and_Derived_Products/CreateNetrcFile.html")
+            return False, f"Incomplete credentials for '{machine}' in .netrc"
+        login, _, password = credentials
+        if not login or not password:
+            #print()
+            return False, f"Incomplete credentials for '{machine}' in .netrc"
+        return True, ""
+
+    except (netrc.NetrcParseError, FileNotFoundError) as e:
+        return False, f"Error parsing .netrc: {e}"
+    
+# note on merge conflict change GPSDate -> int
+def retrieve_all_cddis_types(gps_week: int) -> list[str]:
+    """
+    Retrieve CDDIS file list for a specific GPS week. Using Html get
+    
+    :param gps_week: int value that represent the GPS week e.g 2052
+
+    :return files: Warning unsanatised this will return all files includeing files in bad format 
+    """
+
+    url = f"https://cddis.nasa.gov/archive/gnss/products/{gps_week}/"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        print(f"Failed to fetch files for GPS week {gps_week}: {e}")
+        return []
+    
+    # Parse the HTML links for file names
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    files = [a['href'] for a in soup.find_all('a',class_="archiveItemText", href=True) if not a['href'].endswith('/')]
+    return files
+
+# Note create_cddis_file not currently used anywhere
+# if we are going to be do caching  
+# i'll shift the input to be an list of ints
+# and change the output file into a yaml
+def create_cddis_file(filepath: Path, reference_start: GPSDate) -> None:
+    """
+    Create a file named "CDDIS.list" with CDDIS data types for a given reference start time.
+    """
+    data = retrieve_all_cddis_types(reference_start)
+    cddis_file_path = filepath / "CDDIS.list"
+
+    with open(cddis_file_path, "w") as f:
+        for d in data:
+            try:
+                time = datetime.strptime(d.split("_")[1], "%Y%j%H%M")
+                f.write(f"{d} {time}\n")
+            except (IndexError, ValueError):
+                continue
 
 def retrieve_all_cddis_types(reference_start:int ) -> list[str]:
     """
@@ -425,8 +503,8 @@ if __name__ == "__main__":
     #my_cddis = cddis_handler(cddis_file_path="app/resources/cddis_temp/CDDIS.list",date_time_end_str="2024-04-14T01:30")
     # note that cddis.env setup in utils see download_products.py
 
-    my_cddis = CDDIS_Handler(date_time_start_str="2019-07-18_00:00:00", date_time_end_str="2019-07-18_23:59:30") # will filter for target files ["CLK","BIA","SP3"]
-    #my_cddis = CDDIS_Handler(date_time_start_str="2025-07-05_00:00:00",date_time_end_str="2025-07-05_00:00:00")
+    #my_cddis = CDDIS_Handler(date_time_start_str="2019-07-18_00:00:00", date_time_end_str="2019-07-18_23:59:30") # will filter for target files ["CLK","BIA","SP3"]
+    my_cddis = CDDIS_Handler(date_time_start_str="2025-07-05_00:00:00",date_time_end_str="2025-07-05_00:00:00")
     
     print(my_cddis.df)
     print(my_cddis.valid_products)
