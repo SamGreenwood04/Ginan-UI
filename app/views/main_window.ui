@@ -563,6 +563,45 @@ QPushButton:disabled {
       <item>
        <layout class="QVBoxLayout" name="rightLayout">
         <item>
+        <layout class="QHBoxLayout" name="cddisCredentialsLayout">
+        <item>
+        <spacer name="horizontalSpacer">
+            <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+            <size>
+            <width>40</width>
+            <height>20</height>
+            </size>
+            </property>
+        </spacer>
+        </item>
+        <item>
+        <widget class="QPushButton" name="cddisCredentialsButton">
+            <property name="minimumSize">
+            <size>
+            <width>150</width>
+            <height>30</height>
+            </size>
+            </property>
+            <property name="styleSheet">
+            <string notr="true">QPushButton {
+            background-color: #2c5d7c;
+            color: white;
+            font: 12pt "Segoe UI";
+            padding: 4px 10px;
+            }</string>
+            </property>
+            <property name="text">
+            <string>CDDIS Credentials</string>
+            </property>
+        </widget>
+        </item>
+        </layout>
+        </item>
+      
+        <item>
          <widget class="QLabel" name="workflowLabel">
           <property name="font">
            <font>
