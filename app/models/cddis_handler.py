@@ -118,9 +118,6 @@ class CDDIS_Handler ():
         
         self.__df_parse_cddis_str_array(cddis_list)
 
-
-        
-
     def __str_to_datetime(self, date_time_str):
         """
         PRIVATE METHOD
@@ -434,7 +431,7 @@ if __name__ == "__main__":
     print(my_cddis.df)
     print(my_cddis.valid_products)
     print(my_cddis.get_list_of_valid_analysis_centers())
-    
+
     print(my_cddis.get_df_of_valid_types_tuples("COD"))
     print(my_cddis.get_list_of_valid_project_types("COD"))
     print(my_cddis.get_list_of_valid_solution_types("COD"))
