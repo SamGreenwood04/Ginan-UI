@@ -3,7 +3,14 @@
 CDDIS_Handler Header
 ===============================================================================
 ------------------------------------------------------------------------------
-Usefull stuff
+Usefull stuff for accessing 
+------------------------------------------------------------------------------
+#checks if the user can fetch the cddis files
+validate_netrc(machine="urs.earthdata.nasa.gov") -> tuple[bool, str]:
+# will return (true,"") when everything is good
+# will return (false,"some error") when everything is not good 
+------------------------------------------------------------------------------
+Usefull stuff for accessing cddis data
 ------------------------------------------------------------------------------
 from app.cddis_handler import CDDIS_Handler
 
@@ -31,9 +38,6 @@ from collections import defaultdict
 from pathlib import Path
 from dotenv import load_dotenv
 import numpy as np
-import ftplib
-import os
-from ftplib import FTP_TLS
 from app.utils.gn_functions import GPSDate
 import requests
 from bs4 import BeautifulSoup
