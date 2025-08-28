@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List
+from app.utils.download_products import download_ppp_products
 
 from PySide6.QtCore import QObject, Signal, Qt, QDateTime
 from PySide6.QtGui import QStandardItemModel, QStandardItem
