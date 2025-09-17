@@ -1,52 +1,147 @@
 from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedSeq, CommentedMap
+from ruamel.yaml.scalarstring import PlainScalarString
+from ruamel.yaml.representer import RepresenterError
 from pathlib import Path
+import tempfile
+import os
 
-yaml = YAML() # Create the parser instance
-yaml.preserve_quotes = True # Do not remove quotes around values
-yaml.indent(mapping=4, sequence=4, offset=4) # Preserve indenting through the file
+"""
+YAML utilities for the Ginan-UI application.
 
-def load_yaml(file_path: str) -> dict:
+This module provides safe wrappers around ruamel.yaml to ensure that Python
+objects (e.g., pathlib.Path, lists, strings) are always serialised and
+deserialised in a consistent way.
+
+Key functions:
+- load_yaml(file_path):    Load YAML into memory, converting path-like strings
+                           into pathlib.Path objects where appropriate.
+- write_yaml(file_path):   Write YAML safely. Falls back to normalising values
+                           if ruamel.yaml raises a RepresenterError.
+- update_yaml_values():    Update values in-place, preserving comments/formatting.
+- normalise_yaml_value():  Normalise a single value (Path → PlainScalarString,
+                           list → CommentedSeq, str → PlainScalarString).
+- _normalise_inplace():    Internal helper to recursively normalise an entire
+                           config tree in-place. Used as a safety net in write_yaml().
+
+Conventions:
+- Leading underscore (_) marks helpers intended for internal use only.
+- Public functions (no underscore) are part of the module’s stable API and
+  should be used by other parts of the application.
+"""
+
+# Configure YAML parser
+yaml = YAML()
+yaml.preserve_quotes = True
+yaml.indent(mapping=4, sequence=4, offset=4)
+yaml.width = 4096  # Avoid line wrapping
+yaml.default_flow_style = False  # Use block-style lists
+
+
+def _convert_paths(obj):
+    """Recursively convert plain strings that look like filesystem paths into Path objects."""
+    if isinstance(obj, dict):
+        return {k: _convert_paths(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_paths(v) for v in obj]
+    elif isinstance(obj, (PlainScalarString, str)):
+        s = str(obj)
+        # heuristic: treat as path if it looks like one
+        if "/" in s or s.startswith(".") or s.startswith("~") or os.path.isabs(s):
+            return Path(s).expanduser()
+        return s
+    else:
+        return obj
+
+def load_yaml(file_path: str) -> CommentedMap:
     """
-    Load a YAML file and return its contents as a dictionary-like structure.
-
-    :param file_path: The path to the YAML file to load (e.g. "/data/resources/ppp_example.yaml")
-    :return: Dictionary-like structure containing the contents of the YAML file.
+    Load a YAML file and return its contents, preserving structure and comments.
+    Paths are left as plain strings for consistency.
     """
     path = Path(file_path)
-    data = yaml.load(path.read_text()) # Create a dictionary-like structure
-    return data
+    with path.open('r', encoding='utf-8') as f:
+        data = yaml.load(f)
+        if data is None:
+            raise ValueError(f"Failed to parse or empty YAML file: {file_path}")
+        return _normalise_inplace(data)  # ✅ ensure values are normalised immediately
 
-def write_yaml(file_path: str, config):
+def write_yaml(file_path: str, config, debug: bool = False):
+    """
+    Write a YAML config dictionary to file with clean formatting.
+    All Path objects are normalised to plain strings before dumping.
+    """
     path = Path(file_path)
-    yaml.dump(config, path.open('w'))
+
+    # Proactively normalise everything
+    _normalise_inplace(config)
+
+    with path.open('w', encoding='utf-8') as f:
+        yaml.dump(config, f)
+
+    if debug:
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".yaml") as tmp_file:
+            yaml.dump(config, tmp_file)
+            tmp_file.seek(0)
+            print("[DEBUG] YAML OUTPUT (from temp file):\n" + tmp_file.read())
 
 def update_yaml_values(file_path: str, updates: list[tuple[str, str]]):
     """
-    Modify several YAML keys in the provided file path to new values.
-
-    :param file_path: The path to the YAML file to modify (e.g. "/data/resources/ppp_example.yaml")
-    :param updates: List of (key_path, new_value) tuples, e.g.
-                    [("outputs.outputs_root", "new/path"),
-                     ("inputs.inputs_root", "other/path")]
+    Update several YAML keys in-place without destroying comments or formatting.
+    Values are passed through normalise_yaml_value() for safety.
     """
     path = Path(file_path)
-    data = yaml.load(path.read_text()) # Create a dictionary-like structure
+    with path.open('r', encoding='utf-8') as f:
+        data = yaml.load(f)
+        if data is None:
+            raise ValueError(f"Failed to parse YAML from {file_path}")
 
-    # Iterate through each modification
     for key_path, new_value in updates:
-        # Move through the provided dotted path
         keys = key_path.split(".")
         node = data
-        for k in keys[:-1]: # Iterate to the key before the one we want to edit
+        for k in keys[:-1]:
             if k not in node:
                 raise KeyError(f"Path segment '{k}' not found in {key_path}")
             node = node[k]
 
-        last_key = keys[-1]
-        if last_key not in node:
-            raise KeyError(f"Final key '{last_key}' not found in {key_path}")
+        final_key = keys[-1]
+        if final_key not in node:
+            raise KeyError(f"Final key '{final_key}' not found in {key_path}")
 
-        # Finally, make the change to the specified key-value pair
-        node[last_key] = new_value
+        # Normalise
+        node[final_key] = normalise_yaml_value(new_value)
 
-    yaml.dump(data, path.open("w")) # Open file_path with write permission and dump in the changes
+    with path.open("w", encoding='utf-8') as f:
+        yaml.dump(data, f)
+
+
+def normalise_yaml_value(val):
+    """
+    Ensure values are safe for ruamel.yaml dumping:
+    - Path → PlainScalarString
+    - str (no newlines) → PlainScalarString
+    - list → CommentedSeq with block style
+    """
+    if isinstance(val, Path):
+        return PlainScalarString(str(val))
+    elif isinstance(val, str) and "\n" not in val:
+        return PlainScalarString(val)
+    elif isinstance(val, list) and not isinstance(val, CommentedSeq):
+        seq = CommentedSeq(val)
+        seq.fa.set_block_style()
+        return seq
+    return val
+
+def _normalise_inplace(obj):
+    """
+    Recursively normalise values in-place using normalise_yaml_value().
+    Intended for internal use as a safety net in write_yaml() and load_yaml().
+    """
+    if isinstance(obj, dict):
+        for k, v in list(obj.items()):
+            obj[k] = normalise_yaml_value(v)
+            _normalise_inplace(obj[k])
+    elif isinstance(obj, list):
+        for i, v in enumerate(list(obj)):
+            obj[i] = normalise_yaml_value(v)
+            _normalise_inplace(obj[i])
+    return obj

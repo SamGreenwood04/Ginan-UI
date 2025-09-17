@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List
 
-from PySide6.QtCore import QObject, Signal, Qt, QDateTime
+from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QRunnable, Slot, QThreadPool
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -28,9 +28,13 @@ from PySide6.QtWidgets import (
     QLabel
 )
 
-from app.models.execution import Execution, GENERATED_YAML, TEMPLATE_PATH
+from app.models.execution import Execution, GENERATED_YAML, TEMPLATE_PATH, INPUT_PRODUCTS_PATH
 from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
+from app.utils.products_manager import (archive_products_if_rinex_changed, archive_products_if_selection_changed)
+from app.models.cddis_handler import CDDIS_Handler
+from app.utils.outputs_manager import archive_old_outputs
+from app.utils.workers import CDDISWorker
 
 class InputController(QObject):
     """
@@ -60,7 +64,8 @@ class InputController(QObject):
 
         self.rnx_file: str = ""
         self.output_dir: str = ""
-        
+        self.cddis_handler = None  # Default until set via RNX
+
         # Config file path
         self.config_path = GENERATED_YAML
 
@@ -69,18 +74,20 @@ class InputController(QObject):
         self.ui.outputButton.clicked.connect(self.load_output_dir)
 
         # Initial states
-        self.ui.outputButton.setEnabled(False) # output disabled until RNX chosen
-        self.ui.showConfigButton.setEnabled(False)  # show config disabled until RNX chosen
-        self.ui.processButton.setEnabled(False) # process enabled later by MainWindow
+        self.ui.outputButton.setEnabled(False)
+        self.ui.showConfigButton.setEnabled(False)
+        self.ui.processButton.setEnabled(False)
 
         ### Bind: configuration drop-downs / UIs ###
 
-        # Single-choice combos (populated on open)
         self._bind_combo(self.ui.Mode, self._get_mode_items)
-        self._bind_combo(self.ui.PPP_provider, self._get_ppp_provider_items)
-        self._bind_combo(self.ui.PPP_series, self._get_ppp_series_items)
 
-        # Constellations: multi-select with checkboxes, mirror to constellationsValue label
+        # PPP_provider, project and series
+        self.ui.PPP_provider.currentTextChanged.connect(self._on_ppp_provider_changed)
+        self.ui.PPP_project.currentTextChanged.connect(self._on_ppp_project_changed)
+        self.ui.PPP_series.currentTextChanged.connect(self._on_ppp_series_changed)
+
+        # Constellations
         self._bind_multiselect_combo(
             self.ui.Constellations_2,
             self._get_constellations_items,
@@ -88,30 +95,27 @@ class InputController(QObject):
             placeholder="Select one or more",
         )
 
-
-        # Receiver/Antenna types: allow free-text via popup prompts
+        # Receiver/Antenna types: free-text input
         self._enable_free_text_for_receiver_and_antenna()
 
-        # Antenna offset dialog
+        # Antenna offset
         self.ui.antennaOffsetButton.clicked.connect(self._open_antenna_offset_dialog)
         self.ui.antennaOffsetButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.ui.antennaOffsetValue.setText("0.0, 0.0, 0.0")
 
-        # Time window & Data interval dialogs
+        # Time window and data interval
         self.ui.timeWindowButton.clicked.connect(self._open_time_window_dialog)
         self.ui.timeWindowButton.setCursor(Qt.CursorShape.PointingHandCursor)
-
         self.ui.dataIntervalButton.clicked.connect(self._open_data_interval_dialog)
         self.ui.dataIntervalButton.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Show config and Run PEA buttons
+        # Run buttons
         self.ui.showConfigButton.clicked.connect(self.on_show_config)
         self.ui.showConfigButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.ui.processButton.clicked.connect(self.on_run_pea)
 
-        # CDDIS Credentials button
+        # CDDIS credentials dialog
         self.ui.cddisCredentialsButton.clicked.connect(self._open_cddis_credentials_dialog)
-
 
 
     def _open_cddis_credentials_dialog(self):
@@ -119,113 +123,254 @@ class InputController(QObject):
         dialog = CredentialsDialog(self.parent)
         dialog.exec()
 
-    #region File Selection + Metadata Extraction
-
-    def load_rnx_file(self) -> ExtractedInputs or None:
+    #region File Selection + Metadata Extraction + PPP product selection
+    def load_rnx_file(self) -> ExtractedInputs | None:
         """Pick an RNX file, extract metadata, apply to UI, and enable next steps."""
+
         path = self._select_rnx_file(self.parent)
         if not path:
             return None
 
-        self.rnx_file = path
-        self.ui.terminalTextEdit.append(f"RNX selected: {path}")
+        current_rinex_path = Path(path).resolve()
+        archive_products_if_rinex_changed(
+            current_rinex=current_rinex_path,
+            last_rinex=getattr(self, "last_rinex_path", None),
+            products_dir=INPUT_PRODUCTS_PATH
+        )
+        self.last_rinex_path = current_rinex_path
+        self.rnx_file = str(current_rinex_path)
 
+        self.ui.terminalTextEdit.append(f"📄 RINEX file selected: {self.rnx_file}")
 
-        # Extract information from submitted .RNX file and reflect it in the UI
         try:
-            extractor = RinexExtractor(path)
-            result = extractor.extract_rinex_data(path)
+            extractor = RinexExtractor(self.rnx_file)
+            result = extractor.extract_rinex_data(self.rnx_file)
 
-            # Update UI fields directly
+            self.ui.terminalTextEdit.append("🔍 Scanning CDDIS archive for PPP products. Please wait...")
+
+            # Synchronous CDDIS Products list downloader (for testing only)
+            #try:
+            #    self.ui.terminalTextEdit.append("⚠️ Running synchronous CDDIS test...")
+            #    self.cddis_handler = CDDIS_Handler(result['start_epoch'], result['end_epoch'])
+            #    self.valid_analysis_centers = self.cddis_handler.get_list_of_valid_analysis_centers()
+            #    print("[SYNC TEST] Centers:", self.valid_analysis_centers)
+            #except Exception as e:
+            #    print("[SYNC TEST ERROR]", e)
+
+            # Kick off CDDIS PPP products query in background thread
+            worker = CDDISWorker(result['start_epoch'], result['end_epoch'], result)
+            worker.signals.finished.connect(self._on_cddis_ready)
+            worker.signals.error.connect(self._on_cddis_error)
+            QThreadPool.globalInstance().start(worker)
+
+            # Populate extracted metadata immediately
             self.ui.constellationsValue.setText(result["constellations"])
             self.ui.timeWindowValue.setText(f"{result['start_epoch']} to {result['end_epoch']}")
             self.ui.timeWindowButton.setText(f"{result['start_epoch']} to {result['end_epoch']}")
             self.ui.dataIntervalButton.setText(f"{result['epoch_interval']} s")
             self.ui.receiverTypeValue.setText(result["receiver_type"])
             self.ui.antennaTypeValue.setText(result["antenna_type"])
+            self.ui.antennaOffsetValue.setText(", ".join(map(str, result["antenna_offset"])))
             self.ui.antennaOffsetButton.setText(", ".join(map(str, result["antenna_offset"])))
 
-            # Set left-side combos to extracted values
-            # Receiver type
             self.ui.Receiver_type.clear()
             self.ui.Receiver_type.addItem(result["receiver_type"])
             self.ui.Receiver_type.setCurrentIndex(0)
             self.ui.Receiver_type.lineEdit().setText(result["receiver_type"])
 
-            # Antenna type
             self.ui.Antenna_type.clear()
             self.ui.Antenna_type.addItem(result["antenna_type"])
             self.ui.Antenna_type.setCurrentIndex(0)
             self.ui.Antenna_type.lineEdit().setText(result["antenna_type"])
 
-            # Constellations (multi-select combo)
-            # Completely replace the constellation dropdown behavior with file-specific constellations
-            constellations = [c.strip() for c in result["constellations"].split(",") if c.strip()]
-            combo = self.ui.Constellations_2
-            
-            # Clear any existing bindings and reset combo
-            if hasattr(combo, '_old_showPopup'):
-                delattr(combo, '_old_showPopup')
-            combo.clear()
-            combo.setEditable(True)
-            combo.lineEdit().setReadOnly(True)
-            combo.setInsertPolicy(QComboBox.NoInsert)
-            
-            from PySide6.QtGui import QStandardItemModel, QStandardItem
-            model = QStandardItemModel(combo)
-            for txt in constellations:
-                it = QStandardItem(txt)
-                it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
-                it.setCheckState(Qt.Checked)
-                model.appendRow(it)
-            
-            def on_item_changed(_item):
-                current_model = combo.model()
-                if current_model:
-                    selected = [current_model.item(i).text() for i in range(current_model.rowCount()) if current_model.item(i).checkState() == Qt.Checked]
-                    text = ", ".join(selected) if selected else "Select one or more"
-                    combo.lineEdit().setText(text)
-                    self.ui.constellationsValue.setText(text)
-            
-            model.itemChanged.connect(on_item_changed)
-            combo.setModel(model)
-            
-            # Set current index to -1 to avoid the first item being "selected"
-            combo.setCurrentIndex(-1)
-            
-            # Store references and override showPopup completely
-            combo._constellation_model = model
-            combo._constellation_on_item_changed = on_item_changed
-            
-            def show_popup_constellation():
-                # Ensure model is still connected and items are checked
-                if combo.model() != combo._constellation_model:
-                    combo.setModel(combo._constellation_model)
-                # Make sure no item is currently selected
-                combo.setCurrentIndex(-1)
-                # Call the original showPopup without any custom logic
-                QComboBox.showPopup(combo)
-            
-            combo.showPopup = show_popup_constellation
-            
-            # Set initial text
-            combo.lineEdit().setText(", ".join(constellations))
-            self.ui.constellationsValue.setText(", ".join(constellations))
+            self._update_constellations_multiselect(result["constellations"])
 
-            self.ui.terminalTextEdit.append(".RNX file metadata extracted and applied to UI fields")
+            self.ui.outputButton.setEnabled(True)
+            self.ui.showConfigButton.setEnabled(True)
 
-            self.ui.outputButton.setEnabled(True)  # allow choosing output dir next
-            self.ui.showConfigButton.setEnabled(True)  # allow showing config
+            self.ui.terminalTextEdit.append("⚒️ RINEX file metadata extracted and applied to UI fields")
+            self.ui.outputButton.setEnabled(True)
+            self.ui.showConfigButton.setEnabled(True)
+
         except Exception as e:
             self.ui.terminalTextEdit.append(f"Error extracting RNX metadata: {e}")
-            print(f"Error extracting RNX metadata: {e}")
+            print(f"[Error] RNX metadata extraction failed: {e}")
             return None
 
-        # If both are available already (user might have chosen output first), emit
-        if self.rnx_file and self.output_dir:
-            self.ready.emit(self.rnx_file, self.output_dir)
+        # Always update MainWindow's state
+        self.parent.rnx_file = self.rnx_file
+        print(f"[DEBUG InputCtrl] load_rnx_file set parent.rnx_file={self.parent.rnx_file}")
+
+        if self.output_dir:
+            print(f"[DEBUG InputCtrl] Emitting ready with rnx={self.rnx_file}, out={self.output_dir}")
+            self.ready.emit(str(self.rnx_file), str(self.output_dir))
 
         return result
+
+    def _update_constellations_multiselect(self, constellation_str: str):
+        """
+        Populate the multi-select combo for constellations using checkboxes.
+        """
+        from PySide6.QtGui import QStandardItemModel, QStandardItem
+
+        constellations = [c.strip() for c in constellation_str.split(",") if c.strip()]
+        combo = self.ui.Constellations_2
+
+        # Remove previous bindings
+        if hasattr(combo, '_old_showPopup'):
+            delattr(combo, '_old_showPopup')
+
+        combo.clear()
+        combo.setEditable(True)
+        combo.lineEdit().setReadOnly(True)
+        combo.setInsertPolicy(QComboBox.NoInsert)
+
+        # Build the item model
+        model = QStandardItemModel(combo)
+        for txt in constellations:
+            item = QStandardItem(txt)
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            model.appendRow(item)
+
+        def on_item_changed(_item):
+            selected = [
+                model.item(i).text()
+                for i in range(model.rowCount())
+                if model.item(i).checkState() == Qt.Checked
+            ]
+            label = ", ".join(selected) if selected else "Select one or more"
+            combo.lineEdit().setText(label)
+            self.ui.constellationsValue.setText(label)
+
+        model.itemChanged.connect(on_item_changed)
+        combo.setModel(model)
+        combo.setCurrentIndex(-1)
+
+        # Custom showPopup function to keep things reset
+        def show_popup_constellation():
+            if combo.model() != model:
+                combo.setModel(model)
+            combo.setCurrentIndex(-1)
+            QComboBox.showPopup(combo)
+
+        combo.showPopup = show_popup_constellation
+
+        # Store for access and event consistency
+        combo._constellation_model = model
+        combo._constellation_on_item_changed = on_item_changed
+
+        # Set initial label text
+        combo.lineEdit().setText(", ".join(constellations))
+        self.ui.constellationsValue.setText(", ".join(constellations))
+
+    def _on_cddis_ready(self, handler: CDDIS_Handler, result: dict):
+        self.cddis_handler = handler
+
+        try:
+            self.valid_analysis_centers = handler.get_list_of_valid_analysis_centers()
+
+        except Exception as e:
+            self.valid_analysis_centers = []
+            print(f"[CDDIS] Error accessing analysis centers: {e}")
+
+        if len(self.valid_analysis_centers) == 0:
+            self.ui.terminalTextEdit.append("⚠️ No valid PPP providers found.")
+            self.ui.PPP_provider.clear()
+            self.ui.PPP_provider.addItem("None")
+            self.ui.PPP_series.clear()
+            self.ui.PPP_series.addItem("None")
+            return
+
+        self.ui.PPP_provider.blockSignals(True)
+        self.ui.PPP_provider.clear()
+        self.ui.PPP_provider.addItems(self.valid_analysis_centers)
+        self.ui.PPP_provider.setCurrentIndex(0)
+        self.ui.PPP_provider.blockSignals(False)
+
+        # Update PPP_series based on default PPP_provider
+        self._on_ppp_provider_changed(self.valid_analysis_centers[0])
+
+        self.ui.terminalTextEdit.append(f"✅ CDDIS archive scan complete. Found PPP product providers: {', '.join(self.valid_analysis_centers)}")
+
+    def _on_cddis_error(self, msg):
+        self.ui.terminalTextEdit.append(f"Error loading CDDIS data: {msg}")
+        self.ui.PPP_provider.clear()
+        self.ui.PPP_provider.addItem("None")
+
+    def _on_ppp_provider_changed(self, provider_name: str):
+        if not provider_name or provider_name.strip() == "":
+            print("[Warning] No PPP provider selected — ignoring update.")
+            return
+
+        if not self.cddis_handler:
+            print("[Info] CDDIS handler not initialized yet.")
+            return
+
+        try:
+            # Get DataFrame of valid (project, series) pairs
+            df = self.cddis_handler.get_df_of_valid_types_tuples(provider_name)
+
+            if df.empty:
+                raise ValueError(f"No valid project–series combinations for provider: {provider_name}")
+
+            # Store for future filtering if needed
+            self._valid_project_series_df = df
+
+            project_options = sorted(df['project-type'].unique())
+            series_options = sorted(df['solution-type'].unique())
+
+            self.ui.PPP_project.clear()
+            self.ui.PPP_series.clear()
+
+            self.ui.PPP_project.addItems(project_options)
+            self.ui.PPP_series.addItems(series_options)
+
+            print(f"[CDDIS] Updated PPP_project for {provider_name}: {project_options}")
+            print(f"[CDDIS] Updated PPP_series for {provider_name}: {series_options}")
+
+            # Optionally set default selections here:
+            self.ui.PPP_project.setCurrentIndex(0)
+            self.ui.PPP_series.setCurrentIndex(0)
+
+        except Exception as e:
+            print(f"[Error] Failed to update PPP options for provider {provider_name}: {e}")
+            self.ui.PPP_series.clear()
+            self.ui.PPP_series.addItem("None")
+            self.ui.PPP_project.clear()
+            self.ui.PPP_project.addItem("None")
+
+    def _on_ppp_series_changed(self, selected_series: str):
+        if not hasattr(self, "_valid_project_series_df"):
+            return
+
+        df = self._valid_project_series_df
+        filtered_df = df[df["solution-type"] == selected_series]
+        valid_projects = sorted(filtered_df["project-type"].unique())
+
+        self.ui.PPP_project.blockSignals(True)
+        self.ui.PPP_project.clear()
+        self.ui.PPP_project.addItems(valid_projects)
+        self.ui.PPP_project.setCurrentIndex(0)
+        self.ui.PPP_project.blockSignals(False)
+
+        print(f"[UI] Filtered PPP_project for series '{selected_series}': {valid_projects}")
+        
+    def _on_ppp_project_changed(self, selected_project: str):
+        if not hasattr(self, "_valid_project_series_df"):
+            return
+
+        df = self._valid_project_series_df
+        filtered_df = df[df["project-type"] == selected_project]
+        valid_series = sorted(filtered_df["solution-type"].unique())
+
+        self.ui.PPP_series.blockSignals(True)
+        self.ui.PPP_series.clear()
+        self.ui.PPP_series.addItems(valid_series)
+        self.ui.PPP_series.setCurrentIndex(0)
+        self.ui.PPP_series.blockSignals(False)
+
+        print(f"[UI] Filtered PPP_series for project '{selected_project}': {valid_series}")
 
     def load_output_dir(self):
         """Pick an output directory; if RNX is also set, emit ready."""
@@ -233,14 +378,25 @@ class InputController(QObject):
         if not path:
             return
 
-        self.output_dir = path
-        self.ui.terminalTextEdit.append(f"Output directory selected: {path}")
+        # Ensure output_dir is a Path object
+        self.output_dir = Path(path).resolve()
+        self.ui.terminalTextEdit.append(f"📂 Output directory selected: {self.output_dir}")
 
+        # Archive existing/old outputs
+        visual_dir = self.output_dir / "visual"
+        archive_old_outputs(self.output_dir, visual_dir)
+
+        # Enable process button
         # MainWindow owns when to enable processButton. This controller exposes a helper if needed.
         self.enable_process_button()
 
+        # Always update MainWindow's state
+        self.parent.output_dir = self.output_dir
+        print(f"[DEBUG InputCtrl] load_output_dir set parent.output_dir={self.parent.output_dir}")
+
         if self.rnx_file:
-            self.ready.emit(self.rnx_file, self.output_dir)
+            print(f"[DEBUG InputCtrl] Emitting ready with rnx={self.rnx_file}, out={self.output_dir}")
+            self.ready.emit(str(self.rnx_file), str(self.output_dir))
 
     def enable_process_button(self):
         """Public helper so other components can enable the Process button without knowing UI internals."""
@@ -322,6 +478,9 @@ class InputController(QObject):
         combo.lineEdit().clear()
         combo.lineEdit().setPlaceholderText(placeholder)        
 
+    # ==========================================================
+    # Receiver / Antenna free text popups
+    # ==========================================================
     def _enable_free_text_for_receiver_and_antenna(self):
         """Allow entering custom Receiver/Antenna types via popup prompt."""
         self.ui.Receiver_type.setEditable(True)
@@ -331,20 +490,30 @@ class InputController(QObject):
 
         # Receiver type free text
         def _ask_receiver_type():
-            text, ok = QInputDialog.getText(self.ui.Receiver_type, "Receiver Type", "Enter receiver type:")
+            current_text = self.ui.Receiver_type.currentText().strip()
+            text, ok = QInputDialog.getText(
+                self.ui.Receiver_type,
+                "Receiver Type",
+                "Enter receiver type:",
+                text=current_text  # prefill with current
+            )
             if ok and text:
                 self.ui.Receiver_type.clear()
                 self.ui.Receiver_type.addItem(text)
-                # Let ComboBox display the selected text itself
                 self.ui.Receiver_type.lineEdit().setText(text)
                 self.ui.receiverTypeValue.setText(text)
 
         self.ui.Receiver_type.showPopup = _ask_receiver_type
-        self.ui.receiverTypeValue.setText("")
 
         # Antenna type free text
         def _ask_antenna_type():
-            text, ok = QInputDialog.getText(self.ui.Antenna_type, "Antenna Type", "Enter antenna type:")
+            current_text = self.ui.Antenna_type.currentText().strip()
+            text, ok = QInputDialog.getText(
+                self.ui.Antenna_type,
+                "Antenna Type",
+                "Enter antenna type:",
+                text=current_text  # prefill with current
+            )
             if ok and text:
                 self.ui.Antenna_type.clear()
                 self.ui.Antenna_type.addItem(text)
@@ -352,40 +521,41 @@ class InputController(QObject):
                 self.ui.antennaTypeValue.setText(text)
 
         self.ui.Antenna_type.showPopup = _ask_antenna_type
-        self.ui.antennaTypeValue.setText("")
 
-    #endregion
 
-    #region Small Dialogs
-
+    # ==========================================================
+    # Antenna offset popup
+    # ==========================================================
     def _open_antenna_offset_dialog(self):
         dlg = QDialog(self.ui.antennaOffsetButton)
         dlg.setWindowTitle("Antenna Offset")
 
-        # Try to parse existing U, N, E values
+        # Parse existing "E, N, U"
         try:
-            u0, n0, e0 = [float(x.strip()) for x in self.ui.antennaOffsetValue.text().split(",")]
+            e0, n0, u0 = [float(x.strip()) for x in self.ui.antennaOffsetValue.text().split(",")]
         except Exception:
-            u0 = n0 = e0 = 0.0
+            e0 = n0 = u0 = 0.0
 
         form = QFormLayout(dlg)
 
-        sb_u = QDoubleSpinBox(dlg)
-        sb_u.setRange(-9999, 9999)
-        sb_u.setDecimals(3)
-        sb_u.setValue(u0)
-        sb_n = QDoubleSpinBox(dlg)
-        sb_n.setRange(-9999, 9999)
-        sb_n.setDecimals(3)
-        sb_n.setValue(n0)
         sb_e = QDoubleSpinBox(dlg)
         sb_e.setRange(-9999, 9999)
         sb_e.setDecimals(3)
         sb_e.setValue(e0)
 
-        form.addRow("U:", sb_u)
-        form.addRow("N:", sb_n)
+        sb_n = QDoubleSpinBox(dlg)
+        sb_n.setRange(-9999, 9999)
+        sb_n.setDecimals(3)
+        sb_n.setValue(n0)
+
+        sb_u = QDoubleSpinBox(dlg)
+        sb_u.setRange(-9999, 9999)
+        sb_u.setDecimals(3)
+        sb_u.setValue(u0)
+
         form.addRow("E:", sb_e)
+        form.addRow("N:", sb_n)
+        form.addRow("U:", sb_u)
 
         btn_row = QHBoxLayout()
         ok_btn = QPushButton("OK", dlg)
@@ -394,30 +564,47 @@ class InputController(QObject):
         btn_row.addWidget(cancel_btn)
         form.addRow(btn_row)
 
-        ok_btn.clicked.connect(lambda: self._set_antenna_offset(sb_u, sb_n, sb_e, dlg))
+        ok_btn.clicked.connect(lambda: self._set_antenna_offset(sb_e, sb_n, sb_u, dlg))
         cancel_btn.clicked.connect(dlg.reject)
 
         dlg.exec()
 
-    def _set_antenna_offset(self, sb_u: QDoubleSpinBox, sb_n: QDoubleSpinBox, sb_e: QDoubleSpinBox, dlg: QDialog):
-        u, n, e = sb_u.value(), sb_n.value(), sb_e.value()
-        text = f"{u}, {n}, {e}"
+    def _set_antenna_offset(self, sb_e, sb_n, sb_u, dlg: QDialog):
+        e, n, u = sb_e.value(), sb_n.value(), sb_u.value()
+        text = f"{e}, {n}, {u}"
         self.ui.antennaOffsetButton.setText(text)
         self.ui.antennaOffsetValue.setText(text)
         dlg.accept()
 
+
+    # ==========================================================
+    # Time window popup
+    # ==========================================================
     def _open_time_window_dialog(self):
         dlg = QDialog(self.ui.timeWindowValue)
         dlg.setWindowTitle("Select start / end time")
 
+        # Parse existing "yyyy-MM-dd_HH:mm:ss to yyyy-MM-dd_HH:mm:ss"
+        current_text = self.ui.timeWindowButton.text()
+        try:
+            s_text, e_text = current_text.split(" to ")
+            s_dt = QDateTime.fromString(s_text, "yyyy-MM-dd_HH:mm:ss")
+            e_dt = QDateTime.fromString(e_text, "yyyy-MM-dd_HH:mm:ss")
+            if not s_dt.isValid():
+                s_dt = QDateTime.fromString(s_text, "yyyy-MM-dd HH:mm:ss")
+            if not e_dt.isValid():
+                e_dt = QDateTime.fromString(e_text, "yyyy-MM-dd HH:mm:ss")
+        except Exception:
+            s_dt = e_dt = QDateTime.currentDateTime()
+
         vbox = QVBoxLayout(dlg)
-        start_edit = QDateTimeEdit(QDateTime.currentDateTime(), dlg)
-        end_edit = QDateTimeEdit(QDateTime.currentDateTime(), dlg)
+        start_edit = QDateTimeEdit(s_dt, dlg)
+        end_edit = QDateTimeEdit(e_dt, dlg)
 
         start_edit.setCalendarPopup(True)
         end_edit.setCalendarPopup(True)
-        start_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        end_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        start_edit.setDisplayFormat("yyyy-MM-dd_HH:mm:ss")
+        end_edit.setDisplayFormat("yyyy-MM-dd_HH:mm:ss")
 
         vbox.addWidget(start_edit)
         vbox.addWidget(end_edit)
@@ -434,9 +621,10 @@ class InputController(QObject):
 
         dlg.exec()
 
-    def _set_time_window(self, start_edit: QDateTimeEdit, end_edit: QDateTimeEdit, dlg: QDialog):
+    def _set_time_window(self, start_edit, end_edit, dlg: QDialog):
         if end_edit.dateTime() < start_edit.dateTime():
-            QMessageBox.warning(dlg, "Time error", "End time cannot be earlier than start time.\nPlease select again.")
+            QMessageBox.warning(dlg, "Time error",
+                                "End time cannot be earlier than start time.\nPlease select again.")
             return
 
         s = start_edit.dateTime().toString("yyyy-MM-dd_HH:mm:ss")
@@ -445,20 +633,30 @@ class InputController(QObject):
         self.ui.timeWindowValue.setText(f"{s} to {e}")
         dlg.accept()
 
+
+    # ==========================================================
+    # Data interval popup
+    # ==========================================================
     def _open_data_interval_dialog(self):
+        # Extract current value from button text ("30 s" → 30)
+        current_text = self.ui.dataIntervalButton.text().replace(" s", "").strip()
+        try:
+            current_val = int(current_text)
+        except ValueError:
+            current_val = 1  # fallback if parsing fails
+
         val, ok = QInputDialog.getInt(
             self.ui.dataIntervalButton,
             "Data interval",
             "Input interval (seconds):",
-            1,
+            current_val,   # prefill with current value
             1,
             999_999,
         )
         if ok:
-            # Keep "X s" to match RNX metadata format and existing parsing in MainController
             text = f"{val} s"
             self.ui.dataIntervalButton.setText(text)
-            self.ui.dataIntervalValue.setText(f"{val} s")
+            self.ui.dataIntervalValue.setText(text)
 
     #endregion
 
@@ -512,7 +710,8 @@ class InputController(QObject):
         antenna_type       = self.ui.antennaTypeValue.text()
         antenna_offset_raw = self.ui.antennaOffsetButton.text()  # Get from button, not value label
         ppp_provider       = self.ui.PPP_provider.currentText() if self.ui.PPP_provider.currentText() != "Select one" else ""
-        ppp_series         = self.ui.PPP_series.currentText() if self.ui.PPP_series.currentText() != "Select one" else ""
+        ppp_series         = self.ui.PPP_series.currentText()   if self.ui.PPP_series.currentText()   != "Select one" else ""
+        ppp_project        = self.ui.PPP_project.currentText()  if self.ui.PPP_project.currentText()  != "Select one" else ""
 
         # Parsed values
         start_epoch, end_epoch = self.parse_time_window(time_window_raw)
@@ -533,6 +732,7 @@ class InputController(QObject):
         print("antenna_offset =", antenna_offset)
         print("PPP_provider =", ppp_provider)
         print("PPP_series =", ppp_series)
+        print("PPP_project =", ppp_project)
         print("marker = ", marker_name)
 
         # Returned the values found as a dataclass for easier access
@@ -548,6 +748,7 @@ class InputController(QObject):
             antenna_type=antenna_type,
             ppp_provider=ppp_provider,
             ppp_series=ppp_series,
+            ppp_project=ppp_project,
             rnx_path=rnx_path,
             output_path=self.output_dir,
         )
@@ -559,6 +760,9 @@ class InputController(QObject):
         No longer need to manually select files
         """
         print("opening config file...")
+        print("[DEBUG] on_show_config: rnx_file =", self.rnx_file)
+        # Reload disk version before overwriting with GUI changes
+        self.execution.reload_config()
         inputs = self.extract_ui_values(self.rnx_file)
         self.execution.apply_ui_config(inputs)
         self.execution.write_cached_changes()
@@ -611,13 +815,18 @@ class InputController(QObject):
             )
 
     def on_run_pea(self):
-        """Run PEA processing with validation"""
+        """Triggered when 'Process' is clicked: validates input, archives old products,
+        downloads PPP products, then runs PEA.
+        """
         raw = self.ui.timeWindowValue.text()
-        print(raw)
+        print(f"[UI] Time window raw input: {raw}")
+        print("[DEBUG] on_run_pea: rnx_file =", self.rnx_file)
+
+        # Parse time window
         try:
             start_str, end_str = raw.split("to")
-            start = datetime.strptime(start_str.strip(), "%Y-%m-%d_%H:%M:%S")
-            end = datetime.strptime(end_str.strip(), "%Y-%m-%d_%H:%M:%S")
+            start_time = datetime.strptime(start_str.strip(), "%Y-%m-%d_%H:%M:%S")
+            end_time = datetime.strptime(end_str.strip(), "%Y-%m-%d_%H:%M:%S")
         except ValueError:
             QMessageBox.warning(
                 None,
@@ -627,12 +836,8 @@ class InputController(QObject):
             )
             return
 
-        if start > end:
-            QMessageBox.warning(
-                None,
-                "Time error",
-                "Start time cannot be later than end time."
-            )
+        if start_time > end_time:
+            QMessageBox.warning(None, "Time error", "Start time cannot be later than end time.")
             return
 
         if not getattr(self, "config_path", None):
@@ -642,31 +847,83 @@ class InputController(QObject):
                 "Please click Show config and select a YAML file first."
             )
             return
-        
-        # just for sprint 4 exhibition
-        # self.ui.terminalTextEdit.clear()
-        # self.ui.terminalTextEdit.append("Basic validation passed, starting PEA execution...")
 
-        inputs = self.extract_ui_values(self.rnx_file)
-        # Ignore PPP downloading, TODO: need backend to repair CDDIS connection
+        # Extract PPP provider, project, and series
+        analysis_center = self.ui.PPP_provider.currentText()
+        project_type = self.ui.PPP_project.currentText()
+        solution_type = self.ui.PPP_series.currentText()
+
+        if not analysis_center or analysis_center == "None":
+            self.ui.terminalTextEdit.append("⚠️ No valid PPP provider selected.")
+            return
+        if not project_type or project_type == "None":
+            self.ui.terminalTextEdit.append("⚠️ No valid PPP project selected.")
+            return
+        if not solution_type or solution_type == "None":
+            self.ui.terminalTextEdit.append("⚠️ No valid PPP series selected.")
+            return
+
+        # --- Archive products if PPP selection changed ---
+        current_selection = {
+            "ppp_provider": analysis_center,
+            "ppp_project": project_type,
+            "ppp_series": solution_type,
+        }
+        archive_dir = archive_products_if_selection_changed(
+            current_selection,
+            getattr(self, "last_ppp_selection", None),
+            INPUT_PRODUCTS_PATH,
+        )
+        self.last_ppp_selection = current_selection
+        if archive_dir:
+            self.ui.terminalTextEdit.append(f"📦 Archived old PPP products → {archive_dir}")
+
+        # --- PPP product download step ---
+        target_files = ["SP3", "CLK", "BIA"]
+        download_dir = INPUT_PRODUCTS_PATH
+
         try:
-            download_ppp_products(inputs)
+            self.ui.terminalTextEdit.append(
+                f"📡 Downloading PPP products from CDDIS...\n"
+                f"Provider: {analysis_center}, Project: {project_type}, Series: {solution_type}\n"
+                f"Interval: {start_time} to {end_time}\n"
+                f"→ Saving to: {download_dir}"
+            )
+
+            self.cddis_downloads = self.cddis_handler.download_products(
+                analysis_center=analysis_center,
+                project_type=project_type,
+                solution_type=solution_type,
+                start_time=start_time,
+                end_time=end_time,
+                target_files=target_files,
+                download_dir=download_dir,
+            )
+            self.ui.terminalTextEdit.append("✅ PPP products downloaded successfully.")
+
         except Exception as e:
             self.ui.terminalTextEdit.append(f"⚠️ PPP products download failed: {e}")
             self.ui.terminalTextEdit.append("Continuing without PPP products...")
 
-        self.pea_ready.emit()
-
-        # Ignore PEA execution, TODO: need backend to repair configuration problems
+        # --- Auxiliary GNSS BRDC + EOP data ---
         try:
-            self.execution.execute_config()
+            self.execution.download_pea_auxiliary_products(start_time, end_time)
+            self.ui.terminalTextEdit.append("✅ Auxiliary metadata (BRDC + IAU2000) downloaded.")
+        except Exception as e:
+            self.ui.terminalTextEdit.append(f"⚠️ Failed to download auxiliary metadata: {e}")
+
+        # --- Write updated config ---
+        try:
+            self.execution.reload_config()
+            inputs = self.extract_ui_values(self.rnx_file)
+            self.execution.apply_ui_config(inputs)  # config only, no product archiving
+            self.execution.write_cached_changes()
         except Exception as e:
             self.ui.terminalTextEdit.append(f"⚠️ PEA execution failed: {e}")
             self.ui.terminalTextEdit.append("Continuing to plot generation...")
 
-        # download_ppp_products(inputs)
-        # self.pea_ready.emit()
-        # self.execution.execute_config()
+        # Emit signal and continue with config + PEA execution
+        self.pea_ready.emit()
 
     #endregion
 
@@ -737,12 +994,12 @@ class InputController(QObject):
 
     @staticmethod
     def parse_antenna_offset(antenna_offset_raw: str):
-        """Convert 'u, n, e' into [u, n, e] floats."""
+        """Convert 'e, n, u' into [e, n, u] floats."""
         try:
-            u, n, e = map(str.strip, antenna_offset_raw.split(","))
-            return [float(u), float(n), float(e)]
+            e, n, u = map(str.strip, antenna_offset_raw.split(","))
+            return [float(e), float(n), float(u)]
         except ValueError:
-            raise ValueError("Invalid antenna offset format. Expected: 'u, n, e'")
+            raise ValueError("Invalid antenna offset format. Expected: 'e, n, u'")
 
     @dataclass
     class ExtractedInputs:
@@ -760,6 +1017,7 @@ class InputController(QObject):
         antenna_type: str
         ppp_provider: str
         ppp_series: str
+        ppp_project: str
 
         # File paths associated to this run
         rnx_path: str
@@ -777,9 +1035,10 @@ class InputController(QObject):
     def _get_constellations_items() -> List[str]:
         return ["GPS", "GAL", "GLO", "BDS", "QZS"]
 
-    @staticmethod
-    def _get_ppp_provider_items() -> List[str]:
-        return ["COD", "GFZ", "JPL", "ESA", "IGS", "WUH"]
+    def _get_ppp_provider_items(self) -> List[str]:
+        if hasattr(self, "valid_analysis_centers") and self.valid_analysis_centers:
+            return self.valid_analysis_centers
+        return ["None (select RNX file first)"]
 
     @staticmethod
     def _get_ppp_series_items() -> List[str]:
@@ -833,5 +1092,6 @@ class CredentialsDialog(QDialog):
         QMessageBox.information(self, "Success",
                                 "✅ Credentials saved to:\n" + "\n".join(str(p) for p in paths))
         self.accept()
+
 
 
