@@ -218,7 +218,7 @@ class Execution:
 
         return htmls
     
-    def download_pea_auxiliary_products(self, start_epoch: datetime, end_epoch: datetime):
+    def download_pea_auxiliary_products(self, start_epoch: datetime, end_epoch: datetime, log_callback=None):
         """
         Download auxiliary files required for Ginan PEA:
         - GNSS broadcast navigation files (BRDC)
@@ -226,8 +226,12 @@ class Execution:
 
         :param start_epoch: Start time for processing window
         :param end_epoch: End time for processing window
+        :param log_callback: Optional callback to emit log messages (e.g., to GUI)
         """
-        print("🔽 Starting download of auxiliary PEA metadata...")
+        msg = "🔽 Starting download of auxiliary PEA metadata..."
+        print(msg)
+        if log_callback:
+            log_callback(msg)
 
         # Download broadcast ephemerides
         download_dir = INPUT_PRODUCTS_PATH
@@ -241,15 +245,27 @@ class Execution:
                 source="gnss-data",
                 if_file_present=if_file_present,
             )
-            print("✅ BRDC files downloaded successfully.")
+            msg = "✅ BRDC files downloaded successfully."
+            print(msg)
+            if log_callback:
+                log_callback(msg)
         except Exception as e:
-            print(f"❌ Failed to download BRDC files: {e}")
+            msg = f"❌ Failed to download BRDC files: {e}"
+            print(msg)
+            if log_callback:
+                log_callback(msg)
 
         try:
-            download_iau2000_eop_from_url(download_dir, if_file_present=if_file_present)
-
+            path = download_iau2000_eop_from_url(download_dir, if_file_present=if_file_present)
+            msg = f"✅ IERS IAU2000 EOP file downloaded to {path}"
+            print(msg)
+            if log_callback:
+                log_callback(msg)
         except Exception as e:
-            print(f"❌ Failed to download IAU2000 file: {e}")
+            msg = f"❌ Failed to download IAU2000 file: {e}"
+            print(msg)
+            if log_callback:
+                log_callback(msg)
 
     def reload_config(self):
         """

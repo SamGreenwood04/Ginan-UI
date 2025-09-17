@@ -815,14 +815,14 @@ class InputController(QObject):
             )
 
     def on_run_pea(self):
-        """Triggered when 'Process' is clicked: validates input, archives old products,
-        downloads PPP products, then runs PEA.
+        """Triggered when 'Process' is clicked: validates input, parses time window,
+        applies config, then signals MainWindow to continue with PPP downloads + PEA execution.
         """
         raw = self.ui.timeWindowValue.text()
         print(f"[UI] Time window raw input: {raw}")
         print("[DEBUG] on_run_pea: rnx_file =", self.rnx_file)
 
-        # Parse time window
+        # --- Parse time window ---
         try:
             start_str, end_str = raw.split("to")
             start_time = datetime.strptime(start_str.strip(), "%Y-%m-%d_%H:%M:%S")
@@ -848,81 +848,21 @@ class InputController(QObject):
             )
             return
 
-        # Extract PPP provider, project, and series
-        analysis_center = self.ui.PPP_provider.currentText()
-        project_type = self.ui.PPP_project.currentText()
-        solution_type = self.ui.PPP_series.currentText()
-
-        if not analysis_center or analysis_center == "None":
-            self.ui.terminalTextEdit.append("⚠️ No valid PPP provider selected.")
-            return
-        if not project_type or project_type == "None":
-            self.ui.terminalTextEdit.append("⚠️ No valid PPP project selected.")
-            return
-        if not solution_type or solution_type == "None":
-            self.ui.terminalTextEdit.append("⚠️ No valid PPP series selected.")
-            return
-
-        # --- Archive products if PPP selection changed ---
-        current_selection = {
-            "ppp_provider": analysis_center,
-            "ppp_project": project_type,
-            "ppp_series": solution_type,
-        }
-        archive_dir = archive_products_if_selection_changed(
-            current_selection,
-            getattr(self, "last_ppp_selection", None),
-            INPUT_PRODUCTS_PATH,
-        )
-        self.last_ppp_selection = current_selection
-        if archive_dir:
-            self.ui.terminalTextEdit.append(f"📦 Archived old PPP products → {archive_dir}")
-
-        # --- PPP product download step ---
-        target_files = ["SP3", "CLK", "BIA"]
-        download_dir = INPUT_PRODUCTS_PATH
-
-        try:
-            self.ui.terminalTextEdit.append(
-                f"📡 Downloading PPP products from CDDIS...\n"
-                f"Provider: {analysis_center}, Project: {project_type}, Series: {solution_type}\n"
-                f"Interval: {start_time} to {end_time}\n"
-                f"→ Saving to: {download_dir}"
-            )
-
-            self.cddis_downloads = self.cddis_handler.download_products(
-                analysis_center=analysis_center,
-                project_type=project_type,
-                solution_type=solution_type,
-                start_time=start_time,
-                end_time=end_time,
-                target_files=target_files,
-                download_dir=download_dir,
-            )
-            self.ui.terminalTextEdit.append("✅ PPP products downloaded successfully.")
-
-        except Exception as e:
-            self.ui.terminalTextEdit.append(f"⚠️ PPP products download failed: {e}")
-            self.ui.terminalTextEdit.append("Continuing without PPP products...")
-
-        # --- Auxiliary GNSS BRDC + EOP data ---
-        try:
-            self.execution.download_pea_auxiliary_products(start_time, end_time)
-            self.ui.terminalTextEdit.append("✅ Auxiliary metadata (BRDC + IAU2000) downloaded.")
-        except Exception as e:
-            self.ui.terminalTextEdit.append(f"⚠️ Failed to download auxiliary metadata: {e}")
+        # Store time window so MainWindow can use it later
+        self.start_time = start_time
+        self.end_time = end_time
 
         # --- Write updated config ---
         try:
             self.execution.reload_config()
             inputs = self.extract_ui_values(self.rnx_file)
-            self.execution.apply_ui_config(inputs)  # config only, no product archiving
+            self.execution.apply_ui_config(inputs)  # config only, no product archiving here
             self.execution.write_cached_changes()
         except Exception as e:
-            self.ui.terminalTextEdit.append(f"⚠️ PEA execution failed: {e}")
-            self.ui.terminalTextEdit.append("Continuing to plot generation...")
+            self.ui.terminalTextEdit.append(f"⚠️ Failed to apply config: {e}")
+            return
 
-        # Emit signal and continue with config + PEA execution
+        # --- Emit signal for MainWindow ---
         self.pea_ready.emit()
 
     #endregion

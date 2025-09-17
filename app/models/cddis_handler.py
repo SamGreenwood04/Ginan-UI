@@ -33,6 +33,7 @@ is_valid = my_cddis.is_valid_project_solution_tuple("COD","MGX","FIN")
 
 import re
 from datetime import datetime, timedelta
+import time
 import pandas as pd
 from collections import defaultdict
 from pathlib import Path
@@ -50,7 +51,7 @@ from tqdm import tqdm
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5   # 5s, 10s, 15s backoff
-CHUNK_SIZE = 1024 * 1024  # 1 MB
+CHUNK_SIZE = 512 * 512  # 0.5 MB
 BASE_URL = "https://cddis.nasa.gov/archive"
 
 def validate_netrc(machine="urs.earthdata.nasa.gov") -> tuple[bool, str]:
@@ -478,19 +479,25 @@ class CDDIS_Handler ():
         return None,None
 
     def download_products(
-        self,
-        analysis_center: str,
-        project_type: str,
-        solution_type: str,
-        start_time: datetime,
-        end_time: datetime,
-        target_files: list[str] = None,
-        download_dir: Path = Path("./downloads")
-    ) -> None:
+            self,
+            analysis_center: str,
+            project_type: str,
+            solution_type: str,
+            start_time: datetime,
+            end_time: datetime,
+            target_files: list[str] = None,
+            download_dir: Path = Path("./downloads"),
+            progress_callback=None,
+            log_callback=None,
+            yield_progress: bool = False,
+        ):
         """
         Downloads all matching CDDIS GNSS products for the specified parameters and time window.
-        Retries on failure, resumes partial downloads using `.part` files,
-        and shows a progress bar for each file.
+        Retries on failure, resumes partial downloads using `.part` files.
+   
+        Modes:
+          - Default: blocking call, returns None. Optional progress_callback(filename, percent).
+          - yield_progress=True: acts as a generator yielding (filename, percent).
         """
         download_dir.mkdir(parents=True, exist_ok=True)
         session = requests.Session()
@@ -513,7 +520,10 @@ class CDDIS_Handler ():
         if target_files:
             matching = matching[matching["file_type"].isin(target_files)]
 
-        print(f"📦 Found {len(matching)} matching files to download")
+        if log_callback:
+            log_callback(f"📦 Found {len(matching)} matching files to download")
+        else:
+            print(f"📦 Found {len(matching)} matching files to download")
 
         for _, row in matching.iterrows():
             filename = row["filename"]
@@ -526,7 +536,8 @@ class CDDIS_Handler ():
 
             # Already exists?
             if decompressed_path.exists():
-                print(f"✅ Skipping (already exists): {decompressed_path.name}")
+                msg = f"✅ Skipping (already exists): {decompressed_path.name}"
+                log_callback(msg) if log_callback else print(msg)
                 continue
 
             # Existing .gz but not decompressed
@@ -535,10 +546,12 @@ class CDDIS_Handler ():
                     with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)
                     final_file.unlink()
-                    print(f"🗜️ Decompressed existing: {decompressed_path.name}")
+                    msg = f"🗜️ Decompressed existing: {decompressed_path.name}"
+                    log_callback(msg) if log_callback else print(msg)
                     continue
                 except Exception as e:
-                    print(f"❌ Failed to decompress existing {final_file.name}: {e}")
+                    msg = f"❌ Failed to decompress existing {final_file.name}: {e}"
+                    log_callback(msg) if log_callback else print(msg)
 
             # --- Retry & resume loop ---
             for attempt in range(1, MAX_RETRIES + 1):
@@ -546,38 +559,40 @@ class CDDIS_Handler ():
                     headers = {}
                     mode = "wb"
                     existing_size = 0
-
+ 
                     if partial_file.exists():
                         existing_size = partial_file.stat().st_size
                         if existing_size > 0:
                             headers = {"Range": f"bytes={existing_size}-"}
                             mode = "ab"
-                            print(f"↪️ Resuming {filename} from byte {existing_size}")
+                            msg = f"↪️ Resuming {filename} from byte {existing_size}"
+                            log_callback(msg) if log_callback else print(msg)
 
-                    print(f"⬇️ Downloading: {filename} (attempt {attempt}/{MAX_RETRIES})")
+                    msg = f"⬇️ Downloading: {filename} (attempt {attempt}/{MAX_RETRIES})"
+                    log_callback(msg) if log_callback else print(msg)
 
-                    # --- this whole block is inside try now ---
                     response = session.get(url, headers=headers, stream=True, timeout=30)
                     with response as r:
                         if r.status_code == 416:  # Range beyond EOF → treat as complete
-                            print(f"⚠️ Server says {filename} already complete.")
+                            msg = f"⚠️ Server says {filename} already complete."
+                            log_callback(msg) if log_callback else print(msg)
                             break
                         r.raise_for_status()
 
                         total_size = int(r.headers.get("Content-Length", 0)) + existing_size
-                        with open(partial_file, mode) as f, tqdm(
-                            total=total_size,
-                            initial=existing_size,
-                            unit="B",
-                            unit_scale=True,
-                            unit_divisor=1024,
-                            desc=filename,
-                            ascii=True,
-                        ) as bar:
+                        downloaded = existing_size
+
+                        with open(partial_file, mode) as f:
                             for chunk in r.iter_content(CHUNK_SIZE):
                                 if chunk:
                                     f.write(chunk)
-                                    bar.update(len(chunk))
+                                    downloaded += len(chunk)
+
+                                    percent = int(downloaded * 100 / total_size) if total_size > 0 else 100
+                                    if progress_callback:
+                                        progress_callback(filename, percent)
+                                    if yield_progress:
+                                        yield (filename, percent)
 
                     # Rename partial → final
                     partial_file.rename(final_file)
@@ -587,20 +602,32 @@ class CDDIS_Handler ():
                         with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
                             shutil.copyfileobj(f_in, f_out)
                         final_file.unlink()
-                        print(f"🗜️ Decompressed to: {decompressed_path.name}")
+                        msg = f"🗜️ Decompressed to: {decompressed_path.name}"
+                        log_callback(msg) if log_callback else print(msg)
+
+                    # ✅ per-file completion log
+                    msg = f"✅ Finished downloading {decompressed_path.name}"
+                    log_callback(msg) if log_callback else print(msg)
 
                     break  # success, exit retry loop
 
                 except Exception as e:
                     if attempt == MAX_RETRIES:
-                        print(f"❌ Failed to download {filename} after {MAX_RETRIES} attempts: {e}")
+                        msg = f"❌ Failed to download {filename} after {MAX_RETRIES} attempts: {e}"
+                        log_callback(msg) if log_callback else print(msg)
                         if partial_file.exists():
-                            partial_file.unlink()  # cleanup broken partial
+                            partial_file.unlink()
                     else:
                         wait = RETRY_DELAY * attempt
-                        print(f"⚠️ Download failed ({e}), retrying in {wait}s...")
+                        msg = f"⚠️ Download failed ({e}), retrying in {wait}s..."
+                        log_callback(msg) if log_callback else print(msg)
                         time.sleep(wait)
-                        continue   # retry the same file
+                        continue   # retry same file
+
+        # In generator mode, function is already exhausted by the caller
+        if not yield_progress:
+            return None
+
 
 if __name__ == "__main__":
     my_cddis = CDDIS_Handler(date_time_start_str="2023-09-16_00:00:00", date_time_end_str="2023-09-17_12:00:00") # will filter for target files ["CLK","BIA","SP3"]
