@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List
-from app.utils.download_products import download_ppp_products
 
 from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QRunnable, Slot, QThreadPool
 from PySide6.QtGui import QStandardItemModel, QStandardItem
@@ -32,9 +31,9 @@ from PySide6.QtWidgets import (
 from app.models.execution import Execution, GENERATED_YAML, TEMPLATE_PATH, INPUT_PRODUCTS_PATH
 from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
-from app.utils.products_manager import (archive_products_if_rinex_changed, archive_products_if_selection_changed)
+from app.utils.archive_manager import (archive_products_if_rinex_changed, archive_products_if_selection_changed)
 from app.models.cddis_handler import CDDIS_Handler
-from app.utils.outputs_manager import archive_old_outputs
+from app.utils.archive_manager import archive_old_outputs
 from app.utils.workers import CDDISWorker
 
 class InputController(QObject):

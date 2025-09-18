@@ -3,25 +3,10 @@ import shutil
 import subprocess
 from ruamel.yaml.scalarstring import PlainScalarString
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
-from importlib.resources import files
 from pathlib import Path
-import pandas as pd
-from datetime import datetime
-import logging
-import copy
-
 from app.utils.yaml import load_yaml, write_yaml, normalise_yaml_value
 from app.utils.plot_pos import plot_pos_files
-from app.utils.download_iers_eop import download_iau2000_eop_from_url
-from app.utils.auto_download_PPP import download_brdc
-
-
-
-TEMPLATE_PATH = Path(__file__).parent.parent / "resources" / "Yaml" / "default_config.yaml"
-GENERATED_YAML = Path(__file__).parent.parent / "resources" / "ppp_generated.yaml"
-INPUT_DATA_PATH = Path(__file__).parent.parent / "resources" / "inputData" / "data"
-INPUT_PRODUCTS_PATH = Path(__file__).parent.parent / "resources" / "inputData" / "products"
-TEST_PRODUCTS_PATH = Path(__file__).parent.parent.parent / "tests" / "resources" / "inputData" / "products"
+from app.utils.common_dirs import GENERATED_YAML, TEMPLATE_PATH, INPUT_PRODUCTS_PATH
 
 class Execution:
     def __init__(self, executable, config_path: Path=GENERATED_YAML):
@@ -29,19 +14,29 @@ class Execution:
         self.executable = executable # the PEA executable
         self.changes = False # Flag to track if config has been changed
 
-        config_file = Path(self.config_path)
         template_file = Path(TEMPLATE_PATH)
 
-        if config_file.exists():
-            print(f"[Execution] Using existing config file: {config_file}")
+        if config_path.exists():
+            print(f"[Execution] Using existing config file: {config_path}")
         else:
-            print(f"[Execution] Existing config not found, copying default template: {template_file} → {config_file}")
+            print(f"[Execution] Existing config not found, copying default template: {template_file} → {config_path}")
             try:
-                config_file.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(template_file, config_file)
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(template_file, config_path)
             except Exception as e:
                 raise RuntimeError(f"❌ Failed to copy default config: {e}")
-        self.config = load_yaml(config_file)
+        self.config = load_yaml(config_path)
+
+    def reload_config(self):
+        """
+        Force reload of the YAML config from disk into memory.
+        This allows any manual edits to be picked up before GUI changes are applied.
+        """
+        try:
+            self.config = load_yaml(self.config_path)
+            print(f"[Execution] 🔁 Reloaded config from disk: {self.config_path}")
+        except Exception as e:
+            raise RuntimeError(f"❌ Failed to reload config from {self.config_path}: {e}")
 
     def edit_config(self, key_path: str, value, add_field=False):
         """
@@ -204,65 +199,3 @@ class Execution:
             print("⚠️ No plots were generated.")
 
         return htmls
-
-    def download_pea_auxiliary_products(self, start_epoch: datetime, end_epoch: datetime, log_callback=None):
-        """
-        Download auxiliary files required for Ginan PEA:
-        - GNSS broadcast navigation files (BRDC)
-        - Earth orientation parameters (IAU2000)
-
-        :param start_epoch: Start time for processing window
-        :param end_epoch: End time for processing window
-        :param log_callback: Optional callback to emit log messages (e.g., to GUI)
-        """
-        msg = "🔽 Starting download of auxiliary PEA metadata..."
-        print(msg)
-        if log_callback:
-            log_callback(msg)
-
-        # Download broadcast ephemerides
-        download_dir = INPUT_PRODUCTS_PATH
-        if_file_present = "dont_replace"  # Can change to "replace" or "prompt_user" if needed
-
-        try:
-            download_brdc(
-                download_dir=download_dir,
-                start_epoch=start_epoch,
-                end_epoch=end_epoch,
-                source="gnss-data",
-                if_file_present=if_file_present,
-            )
-            msg = "✅ BRDC files downloaded successfully."
-            print(msg)
-            if log_callback:
-                log_callback(msg)
-        except Exception as e:
-            msg = f"❌ Failed to download BRDC files: {e}"
-            print(msg)
-            if log_callback:
-                log_callback(msg)
-
-        try:
-            path = download_iau2000_eop_from_url(download_dir, if_file_present=if_file_present)
-            msg = f"✅ IERS IAU2000 EOP file downloaded to {path}"
-            print(msg)
-            if log_callback:
-                log_callback(msg)
-        except Exception as e:
-            msg = f"❌ Failed to download IAU2000 file: {e}"
-            print(msg)
-            if log_callback:
-                log_callback(msg)
-
-    def reload_config(self):
-        """
-        Force reload of the YAML config from disk into memory.
-        This allows any manual edits to be picked up before GUI changes are applied.
-        """
-        try:
-            self.config = load_yaml(self.config_path)
-            print(f"[Execution] 🔁 Reloaded config from disk: {self.config_path}")
-        except Exception as e:
-            raise RuntimeError(f"❌ Failed to reload config from {self.config_path}: {e}")
-
-

@@ -11,9 +11,9 @@ from app.utils.ui_compilation import compile_ui
 from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
 from app.utils.cddis_email import get_username_from_netrc, write_email, test_cddis_connection
-from app.utils.metadata_download import start_metadata_download_thread
+from app.utils.download_products_https import start_metadata_download_thread
 from app.utils.workers import PeaExecutionWorker, PPPDownloadWorker
-from app.utils.products_manager import archive_products_if_selection_changed
+from app.utils.archive_manager import archive_products_if_selection_changed
 from app.models.execution import INPUT_PRODUCTS_PATH
 
 # Optional toggle for development visualization testing

@@ -53,29 +53,26 @@ def _convert_paths(obj):
     else:
         return obj
 
-def load_yaml(file_path: str) -> CommentedMap:
+def load_yaml(file_path: Path) -> CommentedMap:
     """
     Load a YAML file and return its contents, preserving structure and comments.
     Paths are left as plain strings for consistency.
     """
-    path = Path(file_path)
-    with path.open('r', encoding='utf-8') as f:
+    with file_path.open('r', encoding='utf-8') as f:
         data = yaml.load(f)
         if data is None:
             raise ValueError(f"Failed to parse or empty YAML file: {file_path}")
         return _normalise_inplace(data)  # ✅ ensure values are normalised immediately
 
-def write_yaml(file_path: str, config, debug: bool = False):
+def write_yaml(file_path: Path, config, debug: bool = False):
     """
     Write a YAML config dictionary to file with clean formatting.
     All Path objects are normalised to plain strings before dumping.
     """
-    path = Path(file_path)
-
     # Proactively normalise everything
     _normalise_inplace(config)
 
-    with path.open('w', encoding='utf-8') as f:
+    with file_path.open('w', encoding='utf-8') as f:
         yaml.dump(config, f)
 
     if debug:
@@ -84,13 +81,12 @@ def write_yaml(file_path: str, config, debug: bool = False):
             tmp_file.seek(0)
             print("[DEBUG] YAML OUTPUT (from temp file):\n" + tmp_file.read())
 
-def update_yaml_values(file_path: str, updates: list[tuple[str, str]]):
+def update_yaml_values(file_path: Path, updates: list[tuple[str, str]]):
     """
     Update several YAML keys in-place without destroying comments or formatting.
     Values are passed through normalise_yaml_value() for safety.
     """
-    path = Path(file_path)
-    with path.open('r', encoding='utf-8') as f:
+    with file_path.open('r', encoding='utf-8') as f:
         data = yaml.load(f)
         if data is None:
             raise ValueError(f"Failed to parse YAML from {file_path}")
@@ -110,7 +106,7 @@ def update_yaml_values(file_path: str, updates: list[tuple[str, str]]):
         # Normalise
         node[final_key] = normalise_yaml_value(new_value)
 
-    with path.open("w", encoding='utf-8') as f:
+    with file_path.open("w", encoding='utf-8') as f:
         yaml.dump(data, f)
 
 

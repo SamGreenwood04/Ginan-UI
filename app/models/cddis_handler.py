@@ -128,7 +128,7 @@ def create_cddis_file(filepath: Path, reference_start: GPSDate) -> None:
             except (IndexError, ValueError):
                 continue
 
-class CDDIS_Handler ():
+class CDDIS_Handler:
     def __init__(self,date_time_start_str:str, date_time_end_str:str,target_files = ["CLK","BIA","SP3"]):    
         """
         CDDIS object constructor. Requires CDDIS input and date_time input inorder to access getters 

@@ -1,13 +1,180 @@
-import os
-from pathlib import Path
-from datetime import datetime, timedelta
-from app.utils.gn_functions import GPSDate
-import numpy as np
-import requests
+import json
+import threading
+from datetime import datetime
+from PyQt6.QtCore import QThread
 from bs4 import BeautifulSoup
+
+from app.utils.common_dirs import INPUT_PRODUCTS_PATH
+from app.utils.gn_functions import GPSDate
+from app.utils.yaml import load_yaml
+import numpy as np
 import netrc
+import requests
+from pathlib import Path
+from app.utils.auto_download_PPP import (
+    download_atx,
+    download_ocean_loading_model,
+    download_atmosphere_loading_model,
+    download_geomagnetic_model,
+    download_ocean_pole_tide_file,
+    download_ocean_tide_potential_model,
+    download_planetary_ephemerides_file,
+    download_trop_model,
+    download_satellite_metadata_snx,
+    download_yaw_files
+)
 
 BASE_URL = "https://cddis.nasa.gov/archive"
+
+def download_file(file_url, download_dir: Path=INPUT_PRODUCTS_PATH, overwrite_file: bool=False) -> Path | None:
+    output_path = Path(download_dir / file_url.split("/")[-1])
+    if output_path.exists() and not overwrite_file:
+        print(f"❌ File already downloaded: {output_path}")
+        return output_path
+    else:
+        try:
+            response = requests.get(file_url, timeout=10)
+            response.raise_for_status()
+            with open(output_path, "wb") as file:
+                file.write(response.content)
+            print(f"✅ File downloaded: {output_path}")
+            return output_path
+
+        except requests.RequestException:
+            print(f"❌ Failed to download: {file_url}")
+            return None
+
+def download_metadata(terminal_callback=None):
+    """
+    Download required PPP auxiliary metadata files using the existing auto-download functions.
+    :param terminal_callback: Optional function to redirect print output (e.g., to GUI terminal)
+    """
+    def log(msg):
+        if terminal_callback:
+            terminal_callback(msg)
+        else:
+            print(msg)
+
+    target_dir = INPUT_PRODUCTS_PATH
+    tables_dir = INPUT_PRODUCTS_PATH / "tables"
+    trop_dir = INPUT_PRODUCTS_PATH / "tables"
+    trop_model = "gpt2"
+    long_filename = False
+    if_file_present = "dont_replace"
+
+    log("🌐 Starting auxiliary metadata download...")
+    log(f"📁 Download path: {target_dir}")
+
+    try:
+        download_atx(download_dir=target_dir, long_filename=True, if_file_present=if_file_present)
+        download_satellite_metadata_snx(download_dir=target_dir, if_file_present=if_file_present)
+        download_ocean_loading_model(download_dir=tables_dir, if_file_present=if_file_present)
+        download_atmosphere_loading_model(download_dir=tables_dir, if_file_present=if_file_present)
+        download_geomagnetic_model(download_dir=tables_dir, if_file_present=if_file_present)
+        download_ocean_pole_tide_file(download_dir=tables_dir, if_file_present=if_file_present)
+        download_ocean_tide_potential_model(download_dir=tables_dir, if_file_present=if_file_present)
+        download_planetary_ephemerides_file(download_dir=tables_dir, if_file_present=if_file_present)
+        download_trop_model(download_dir=trop_dir, model=trop_model, if_file_present=if_file_present)
+        download_yaw_files(download_dir=tables_dir, if_file_present=if_file_present)
+    except Exception as e:
+        log(f"❌ Metadata download failed: {e}")
+        return
+
+    log("✅ All required metadata files downloaded (or already present).")
+
+def start_metadata_download_thread(terminal_callback=None):
+    """
+    Start metadata download in a background thread.
+    :param terminal_callback: Optional function to redirect print output (e.g., to GUI terminal)
+    """
+    thread = threading.Thread(target=download_metadata, args=(terminal_callback,), daemon=True)
+    thread.start()
+
+def download_metadata2(terminal_callback=None):
+    """
+    Download required PPP auxiliary metadata files using the existing auto-download functions.
+
+    :param terminal_callback: Optional function to redirect print output (e.g., to GUI terminal)
+    """
+    def log(msg):
+        if terminal_callback:
+            terminal_callback(msg)
+        else:
+            print(msg)
+
+    target_dir = INPUT_PRODUCTS_PATH
+    tables_dir = INPUT_PRODUCTS_PATH / "tables"
+    trop_dir = INPUT_PRODUCTS_PATH / "tables"
+
+    log("🌐 Starting auxiliary metadata download...")
+
+    files_to_download = [
+        ("https://files.igs.org/pub/station/general/igs20.atx", target_dir),
+        ("https://files.igs.org/pub/station/general/igs_satellite_metadata.snx", target_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/OLOAD_GO.BLQ.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/ALOAD_GO.BLQ.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/igrf14coeffs.txt.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/opoleloadcoefcmcor.txt.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/fes2014b_Cnm-Snm.dat.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/DE436.1950.2050.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/gpt_25.grd.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/bds_yaw_modes.snx.gz", tables_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/qzss_yaw_modes.snx.gz", trop_dir),
+        ("https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/sat_yaw_bias_rate.snx.gz", tables_dir)
+    ]
+    for file, dest in files_to_download:
+        try:
+            download_file(file, dest)
+            log("✅ Downloaded metadata!")
+        except Exception as e:
+            log(f"❌ Metadata download failed: {e}")
+
+    log("✅ All required metadata files downloaded (or already present).")
+
+def download_pea_auxiliary_products(start_epoch: datetime, end_epoch: datetime, log_callback=None):
+    """
+    Download auxiliary files required for Ginan PEA:
+    - GNSS broadcast navigation files (BRDC)
+    - Earth orientation parameters (IAU2000)
+
+    :param start_epoch: Start time for processing window
+    :param end_epoch: End time for processing window
+    :param log_callback: Optional callback to emit log messages (e.g., to GUI)
+    """
+    msg = "🔽 Starting download of auxiliary PEA metadata..."
+    print(msg)
+    if log_callback:
+        log_callback(msg)
+
+    params = {
+        "metadataStatus": "valid",
+        "stationId": "BRDC",
+        "fileType": "obs",
+        "rinexVersion": "3",
+        "filePeriod": "01D",
+        "decompress": "true",
+        "startDate": start_epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "endDate": end_epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "tenantId": "default"
+    }
+    query = requests.get("https://data.gnss.ga.gov.au/api/rinexFiles", params=params, headers={})
+    query.raise_for_status()
+    for response in json.loads(query.content):
+        print(response)
+        if log_callback:
+            log_callback(response)
+
+
+def reload_config(self):
+    """
+    Force reload of the YAML config from disk into memory.
+    This allows any manual edits to be picked up before GUI changes are applied.
+    """
+    try:
+        self.config = load_yaml(self.config_path)
+        print(f"[Execution] 🔁 Reloaded config from disk: {self.config_path}")
+    except Exception as e:
+        raise RuntimeError(f"❌ Failed to reload config from {self.config_path}: {e}")
 
 def validate_netrc(machine="urs.earthdata.nasa.gov") -> bool:
     """
@@ -54,7 +221,6 @@ def retrieve_all_cddis_types(gps_week: int) -> list[str]:
         return []
     
     # Parse the HTML links for file names
-    from bs4 import BeautifulSoup
     soup = BeautifulSoup(response.text, 'html.parser')
     files = [a['href'] for a in soup.find_all('a', href=True) if not a['href'].endswith('/')]
     return files
