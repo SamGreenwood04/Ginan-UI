@@ -66,6 +66,7 @@ class PeaExecutionWorker(QObject):
             print("[PeaExecutionWorker] Execution finished successfully.")
             self.finished.emit()
         except Exception as e:
+            tb = traceback.format_exc()
             print(f"[PeaExecutionWorker] Exception:\n{tb}")
             self.error.emit(str(e))
 
