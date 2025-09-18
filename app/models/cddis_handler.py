@@ -137,12 +137,9 @@ def validate_netrc(machine="urs.earthdata.nasa.gov") -> tuple[bool, str]:
     try:
         credentials = netrc.netrc(netrc_path).authenticators(machine)
         if credentials is None:
-            #print(f"EarthData registration: https://urs.earthdata.nasa.gov/users/new")
-            #print(f"Instructions for creating .netrc file: https://cddis.nasa.gov/Data_and_Derived_Products/CreateNetrcFile.html")
             return False, f"Incomplete credentials for '{machine}' in .netrc"
         login, _, password = credentials
         if not login or not password:
-            #print()
             return False, f"Incomplete credentials for '{machine}' in .netrc"
         return True, ""
 
@@ -344,7 +341,7 @@ class CDDIS_Handler ():
 
     def __analysis_center_isin(self,analysis_center):
         if(analysis_center in self.get_list_of_valid_analysis_centers()):
-            return True
+            return
         raise ValueError(f"{analysis_center} is not a valid anaylsis center")
         
 
