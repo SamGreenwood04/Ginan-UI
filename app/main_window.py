@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from PySide6.QtCore import QUrl, Signal, QObject, QThread, Slot
+from PySide6.QtCore import QUrl, Signal, QObject, QThread, Slot, Qt
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QTextCursor
@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.rnx_file: str | None = None
         self.output_dir: str | None = None
         self.download_progress: dict[str, int] = {}  # track per-file progress
+        self.is_processing = False
 
         # Visualisation widgets
         self.openInBrowserBtn = QPushButton("Open in Browser", self)
@@ -83,9 +84,29 @@ class MainWindow(QMainWindow):
         """Append a log line normally """
         self.ui.terminalTextEdit.append(msg)
 
+    def _set_processing_state(self, processing: bool):
+        """Enable/disable UI elements during processing"""
+        self.is_processing = processing
+
+        # Disable/enable the process button
+        self.ui.processButton.setEnabled(not processing)
+
+        # Optionally disable other critical UI elements during processing
+        self.ui.observationsButton.setEnabled(not processing)
+        self.ui.outputButton.setEnabled(not processing)
+        self.ui.showConfigButton.setEnabled(not processing)
+
+        # Update button text to show processing state
+        if processing:
+            self.ui.processButton.setText("Processing...")
+            # Set cursor to waiting cursor for visual feedback
+            self.setCursor(Qt.CursorShape.WaitCursor)
+        else:
+            self.ui.processButton.setText("Process")
+            self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def on_files_ready(self, rnx_path: str, out_path: str):
-        #self.log_message(f"[DEBUG] on_files_ready: rnx={rnx_path}, out={out_path}")
+        # self.log_message(f"[DEBUG] on_files_ready: rnx={rnx_path}, out={out_path}")
         self.rnx_file = rnx_path
         self.output_dir = out_path
 
@@ -93,6 +114,14 @@ class MainWindow(QMainWindow):
         if not self.rnx_file or not self.output_dir:
             self.log_message("⚠️ Please select RINEX and output directory first.")
             return
+
+        # Prevent multiple simultaneous processing
+        if self.is_processing:
+            self.log_message("⚠️ Processing already in progress. Please wait...")
+            return
+
+        # Lock the "Process" button and set processing state
+        self._set_processing_state(True)
 
         # Get PPP params from UI
         ac = self.ui.PPP_provider.currentText()
@@ -144,7 +173,7 @@ class MainWindow(QMainWindow):
 
         self.log_message("📡 Starting PPP product downloads...")
         self.download_thread.start()
- 
+
     @Slot(str, int)
     def _on_download_progress(self, filename: str, percent: int):
         """Update progress display in-place at the bottom of the UI terminal."""
@@ -182,9 +211,12 @@ class MainWindow(QMainWindow):
         self.log_message(message)
         if success:
             self._start_pea_execution()
+        else:
+            self._set_processing_state(False)
 
     def _on_download_error(self, msg):
         self.log_message(f"⚠️ PPP download error: {msg}")
+        self._set_processing_state(False)
 
     def _start_pea_execution(self):
         self.log_message("⚙️ Starting PEA execution in background...")
@@ -206,9 +238,11 @@ class MainWindow(QMainWindow):
     def _on_pea_finished(self):
         self.log_message("✅ PEA processing completed.")
         self._run_visualisation()
+        self._set_processing_state(False)
 
     def _on_pea_error(self, msg: str):
         self.log_message(f"⚠️ PEA execution failed: {msg}")
+        self._set_processing_state(False)
 
     def _run_visualisation(self):
         try:
