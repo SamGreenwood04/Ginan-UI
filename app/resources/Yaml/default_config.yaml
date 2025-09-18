@@ -2,8 +2,8 @@ inputs:
     inputs_root:  #USER_SET
 
     atx_files: [igs20.atx] # Required
-    igrf_files: [tables/igrf13coeffs.txt]
-    ###erp_files: [finals.data.iau2000.txt]
+    igrf_files: [tables/igrf14coeffs.txt]
+    erp_files: [finals.data.iau2000.txt]
     planetary_ephemeris_files: [tables/DE436.1950.2050]
 
     troposphere:
@@ -16,12 +16,15 @@ inputs:
 
     snx_files:
         # Use a wild card (*) to include all files matching the description in the directory
-        - "*.SNX"
+        - igs_satellite_metadata.snx
+        - tables/sat_yaw_bias_rate.snx
+        - tables/qzss_yaw_modes.snx
+        - tables/bds_yaw_modes.snx
+        #- "*.SNX"
 
     satellite_data:
-        #nav_files: # Not required
-            #- "BRDC*"
-            # - "*.rnx"
+        nav_files: # Not required
+            - "BRDC*"
 
         clk_files:
             - "*.CLK"
@@ -63,7 +66,7 @@ satellite_options:
         phase_sigma: 0 # Standard deviation of phase measurmeents
         models:
             phase_bias:
-                enable: false
+                enable: true
 
 receiver_options:
     global:
@@ -88,6 +91,10 @@ receiver_options:
                 otl: true # Enable ocean tide loading
                 solid: true # Enable solid Earth tides
                 spole: true # Enable solid Earth pole tides
+            ionospheric_components:
+                use_2nd_order:  true
+                use_3rd_order:  true
+
     TEST: #change to header name of RNX
         receiver_type:       # #USER_SET (string)
         antenna_type:        # #USER_SET (string)
@@ -114,6 +121,7 @@ processing_options:
     gnss_general:
         #eop_comp
         add_eop_component: true
+        use_primary_signals: true
         sys_options:
             gps:
                 process: false
@@ -182,8 +190,7 @@ processing_options:
             use_if_combo: false # Combine 'uncombined' measurements to simulate an ionosphere-free solution
 
         chunking:
-            by_receiver: true # Split large filter and measurement matrices blockwise by receiver ID to improve processing speed
-            by_satellite: false # Split large filter and measurement matrices blockwise by satellite ID to improve processing speed
+            by_receiver: false # Split large filter and measurement matrices blockwise by receiver ID to improve processing speed
             size: 0
 
         rts: # Rauch-Tung-Striebel (RTS) backwards smoothing
@@ -206,10 +213,9 @@ processing_options:
             enable: true # Enable deweighting of all referencing measurements
         error_accumulation:
             enable: true
-            receiver_error_count_threshold: 4
+            receiver_error_count_threshold: 10
             receiver_error_epochs_threshold: 4
         ambiguities:
-            outage_reset_limit: 300
             phase_reject_limit: 2 # Reset ambiguity after 2 large fractional residuals are found (replaces phase_reject_count:)
             reset_on: # Reset ambiguities when slip is detected by the following
                 gf: true # GF test
@@ -218,20 +224,7 @@ processing_options:
                 scdia: true # SCDIA test
 
 estimation_parameters:
-    global_models:
-        eop:
-            # estimated:        [true] # Estimate state in kalman filter
-            sigma: [1000] # Apriori sigma values
-            process_noise: [0] # Process noise sigmas
-        eop_rates:
-            # estimated:        [true] # Estimate state in kalman filter
-            sigma: [1000] # Apriori sigma values
-            process_noise: [0] # Process noise sigmas
-        ion:
-            estimated: [false] # Estimate state in kalman filter
-            sigma: [-1] # Apriori sigma values
-            process_noise: [0] # Process noise sigmas
-
+    
     receivers:
         global:
             pos:
@@ -251,11 +244,6 @@ estimation_parameters:
                 estimated: [true]
                 sigma: [1000]
                 process_noise: [100]
-            ant_delta:
-                estimated: [true]
-                sigma: [10]
-                process_noise: [1]
-                tau: [100]
             clock_rate:
                 estimated: [false]
                 sigma: [0.005]
@@ -264,6 +252,7 @@ estimation_parameters:
                 estimated: [true]
                 sigma: [1000]
                 process_noise: [0]
+                outage_limit: [300]
             ion_stec: # Ionospheric slant delay
                 estimated: [true] # Estimate state in kalman filter
                 sigma: [200] # Apriori sigma values
@@ -284,4 +273,10 @@ estimation_parameters:
                 estimated: [false]
                 sigma: [10]
                 process_noise: [0]
+            gps:
+                l5q:
+                    phase_bias:
+                        estimated: [true]
+                        sigma: [10]
+                        process_noise: [0.001]    
 

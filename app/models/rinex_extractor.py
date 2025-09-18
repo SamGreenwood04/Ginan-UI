@@ -78,7 +78,7 @@ class RinexExtractor:
                         h = float(line[0:14].strip())
                         e = float(line[14:28].strip())
                         n = float(line[28:42].strip())
-                        antenna_offset = [h, e, n]
+                        antenna_offset = [e, n, h]
 
                     elif label == "END OF HEADER":
                         in_header = False
