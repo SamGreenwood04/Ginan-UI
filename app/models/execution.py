@@ -52,15 +52,16 @@ class Execution:
             node = node[key]
         if not add_field:
             if keys[-1] not in node:
-                raise KeyError(f"Key '{keys[-1]}' not found in {node}")
+                # raise KeyError(f"Key '{keys[-1]}' not found in {node}")
+                pass
         node[keys[-1]] = value
 
     def apply_ui_config(self, inputs):
         self.changes = True
         # 1. Set core inputs / outputs
         self.edit_config("inputs.inputs_root", str(INPUT_PRODUCTS_PATH) + "/", False)
-        self.edit_config("inputs.gnss_observations.gnss_observations_root", str(INPUT_PRODUCTS_PATH), False)
-        self.edit_config("inputs.gnss_observations.rnx_inputs", inputs.rnx_path, False)
+        #self.edit_config("inputs.gnss_observations.gnss_observations_root", str(INPUT_PRODUCTS_PATH), True)
+        self.edit_config("inputs.gnss_observations.rnx_inputs", [inputs.rnx_path], False)
         self.edit_config("outputs.outputs_root", inputs.output_path, False)
 
         # 2. Modify the config file to use the right receiver acronym

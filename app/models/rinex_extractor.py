@@ -28,6 +28,7 @@ class RinexExtractor:
 
         # Iterate through each line of the .RNX file
         previous_observation_dt = None
+        epoch_interval = None
         in_header = True
         with open(rinex_path, "r") as file:
             for line in file:
