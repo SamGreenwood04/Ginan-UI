@@ -56,7 +56,7 @@ class VisualisationController(QObject):
 
     def display_html(self, index: int):
         """Embed the *index*-th html into the QTextEdit panel."""
-        if not (0 <= index < len(self.html_files)):
+        if not isinstance(index, int) or not (0 <= index < len(self.html_files)):
             return
         file_path = self.html_files[index]
         self.current_index = index
@@ -89,7 +89,13 @@ class VisualisationController(QObject):
     def bind_selector(self, combo: QComboBox):
         """Wire a selector combo to this controller and populate on every update."""
         self._selector = combo
-        combo.currentIndexChanged.connect(lambda _: self.display_html(combo.currentData()))
+
+        def safe_display():
+            data = combo.currentData()
+            if isinstance(data, int):  # Only proceed if it's a valid index
+                self.display_html(data)
+
+        combo.currentIndexChanged.connect(lambda _: safe_display())
         self._refresh_selector()
 
     def _refresh_selector(self):
