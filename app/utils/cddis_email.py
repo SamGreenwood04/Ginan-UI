@@ -2,10 +2,12 @@
 from __future__ import annotations
 import os
 import platform
+import time
 from pathlib import Path
 from typing import Tuple
 import netrc
 import base64
+import requests
 
 ENV_FILE = Path(__file__).resolve().parent / "CDDIS.env"
 EMAIL_KEY = "EMAIL"
@@ -129,24 +131,28 @@ def test_cddis_connection(timeout: int = 15) -> tuple[bool, str]:
     Phase 1: Access robots.txt (network reachable)
     Phase 2: Use requests.Session() with (user, pass) from .netrc to access a restricted directory (authentication valid)
     """
-    import requests
     # Phase 1: Lightweight connectivity
+    print("Testing connectivity to cddis.nasa.gov...")
+    start_time = time.perf_counter()
     r = requests.get("https://cddis.nasa.gov/robots.txt",
-                     timeout=(5, timeout), headers={"User-Agent": "ginan-ui/https-check"})
+                     timeout=(5, timeout))
     if r.status_code != 200:
         return False, f"HTTP {r.status_code} on robots.txt"
+    print(f"Connectivity OK. Took {time.perf_counter() - start_time:.3f} seconds\nTesting authentication using .netrc...")
 
     # Phase 2: Restricted directory authentication
+    start_time = time.perf_counter()
     creds = _get_netrc_auth()
     if not creds:
         return False, "no usable credentials in .netrc"
     session = requests.Session()
     session.auth = creds
-    url = "https://cddis.nasa.gov/archive/gnss/products/2060/"  # Historical weekly directory, reliably available
-    resp = session.get(url, timeout=(5, timeout),
-                       headers={"User-Agent": "ginan-ui/auth-check"},
-                       allow_redirects=True)
+    url = "https://cddis.nasa.gov/archive/00readme"  # Within the restricted directory
+    resp = session.get(url, timeout=(5, timeout), allow_redirects=True)
     head = resp.text[:1200]
     if resp.status_code == 200 and "Earthdata Login" not in head:
-        return True, "AUTH OK"
+        return True, f"AUTH OK, took {time.perf_counter() - start_time:.3f} seconds"
     return False, f"HTTP {resp.status_code} or login page returned"
+
+if __name__ == "__main__":
+    print(test_cddis_connection())

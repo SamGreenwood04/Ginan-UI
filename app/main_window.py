@@ -4,7 +4,7 @@ from PySide6.QtCore import QUrl, Signal, QObject, QThread, Slot, Qt
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QTextCursor
-
+from app.utils.cddis_credentials import validate_netrc as gui_validate_netrc
 from app.models.execution import Execution
 from app.utils.find_executable import get_pea_exec
 from app.utils.ui_compilation import compile_ui
@@ -268,8 +268,6 @@ class MainWindow(QMainWindow):
                 self.log_message(f"[Dev] Test plot generation failed: {err}")
 
     def _validate_cddis_credentials_once(self):
-        from app.utils.cddis_credentials import validate_netrc as gui_validate_netrc
-
         ok, where = gui_validate_netrc()
         if not ok and hasattr(self.ui, "cddisCredentialsButton"):
             self.log_message("⚠️  No Earthdata credentials. Opening CDDIS Credentials dialog…")
@@ -291,7 +289,7 @@ class MainWindow(QMainWindow):
                 f"❌ CDDIS connectivity check failed: {why}. Please verify Earthdata credentials via the CDDIS Credentials dialog."
             )
             return
-        self.log_message("✅ CDDIS connectivity check passed.")
+        self.log_message(f"✅ CDDIS connectivity check passed in {why.split(' ')[-2]} seconds.")
 
         write_email(email_candidate)
         self.log_message(f"✉️ EMAIL set to: {email_candidate}")
