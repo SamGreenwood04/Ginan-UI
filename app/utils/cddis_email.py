@@ -110,7 +110,7 @@ def ensure_email_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tupl
 # ------------------------------
 #  Retrieve (username, password) from .netrc for authentication testing
 # ------------------------------
-def _get_netrc_auth() -> tuple[str, str] | None:
+def get_netrc_auth() -> tuple[str, str] | None:
     """Retrieve (username, password) from .netrc/_netrc."""
     p = _pick_netrc()
     if not p.exists():
@@ -142,7 +142,7 @@ def test_cddis_connection(timeout: int = 15) -> tuple[bool, str]:
 
     # Phase 2: Restricted directory authentication
     start_time = time.perf_counter()
-    creds = _get_netrc_auth()
+    creds = get_netrc_auth()
     if not creds:
         return False, "no usable credentials in .netrc"
     session = requests.Session()

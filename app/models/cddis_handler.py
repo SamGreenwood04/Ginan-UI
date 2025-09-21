@@ -1,653 +1,289 @@
-"""
-===============================================================================
-CDDIS_Handler Header
-===============================================================================
-------------------------------------------------------------------------------
-Usefull stuff for accessing 
-------------------------------------------------------------------------------
-#checks if the user can fetch the cddis files
-validate_netrc(machine="urs.earthdata.nasa.gov") -> tuple[bool, str]:
-# will return (true,"") when everything is good
-# will return (false,"some error") when everything is not good 
-------------------------------------------------------------------------------
-Usefull stuff for accessing cddis data
-------------------------------------------------------------------------------
-from app.cddis_handler import CDDIS_Handler
-
-#auto_populate values if found if none are found then -> (none, none)
-project_type_optimal, solution_type_optimal = my_cddis.get_optimal_project_solution_tuple("COD") 
-
-# returns list of valid analysis_centers that user can input
-valid_ac = my_cddis.get_list_of_valid_analysis_centers()
-
-# returns list of valid project_types for given analysis_centers
-project_types = my_cddis.get_list_of_valid_project_types("COD") 
-
-# returns list of valid solution_types for given analysis_centers
-solution_types = my_cddis.get_list_of_valid_solution_types("COD")
-
-# validate user input is valid where inputs("analysis_center","project_types","solution_type")
-is_valid = my_cddis.is_valid_project_solution_tuple("COD","MGX","FIN")
-
-"""
-
-import re
-from datetime import datetime, timedelta
-import time
-import pandas as pd
-from collections import defaultdict
-from pathlib import Path
-from dotenv import load_dotenv
-import numpy as np
-from app.utils.gn_functions import GPSDate
-import requests
-from bs4 import BeautifulSoup
-import netrc
-import platform
-from urllib.parse import urljoin
 import gzip
 import shutil
-from tqdm import tqdm  
+import time
+from datetime import datetime, timedelta
+from netrc import netrc
+from pathlib import Path
 
-MAX_RETRIES = 3
-RETRY_DELAY = 5   # 5s, 10s, 15s backoff
-CHUNK_SIZE = 512 * 512  # 0.5 MB
+import pandas as pd
+import numpy as np
+
+from app.utils.cddis_email import get_netrc_auth
+from app.utils.gn_functions import GPSDate
+import requests
+from bs4 import BeautifulSoup, SoupStrainer
+
 BASE_URL = "https://cddis.nasa.gov/archive"
+MAX_RETRIES = 3
 
-def validate_netrc(machine="urs.earthdata.nasa.gov") -> tuple[bool, str]:
+def date_to_gpswk(date: datetime) -> int:
+    return int(GPSDate(np.datetime64(date)).gpswk)
+
+def gpswk_to_date(gps_week: int) -> datetime:
+    return GPSDate(gps_week).as_datetime
+
+def str_to_datetime(date_time_str):
     """
-    runs checks on the .netrc file to make sure it's valid
-
-    :param machine: The target credentials to use defaulted to urs.earthdata.nasa.gov
-    :returns (bool,str): If returns true then string will be empty. If false string will contain error message 
+    :param date_time_str: YYYY-MM-DD_HH:mm:ss
+    :returns datetime: datetime.strptime()
     """
-    if platform.system() == "Windows":
-        netrc_path = Path.home() / "_netrc"
-    else: # will assume linux 
-        netrc_path = Path.home() / ".netrc"
-
-    if not netrc_path.exists():
-        #(f".netrc wasn't found at {netrc_path}")
-        return False, (f".netrc wasn't found at {netrc_path}")
+    # Note can shift over to YYYY-dddHHmm format if needed through datetime.strptime(date_time,"%Y%j%H%M")
     try:
-        credentials = netrc.netrc(netrc_path).authenticators(machine)
-        if credentials is None:
-            #print(f"EarthData registration: https://urs.earthdata.nasa.gov/users/new")
-            #print(f"Instructions for creating .netrc file: https://cddis.nasa.gov/Data_and_Derived_Products/CreateNetrcFile.html")
-            return False, f"Incomplete credentials for '{machine}' in .netrc"
-        login, _, password = credentials
-        if not login or not password:
-            #print()
-            return False, f"Incomplete credentials for '{machine}' in .netrc"
-        return True, ""
+        return datetime.strptime(date_time_str, "%Y-%m-%d_%H:%M:%S")
+    except ValueError:
+        raise ValueError("Invalid datetime format. Use YYYY-MM-DDTHH:MM (e.g. 2025-05-01_00:00:00)")
 
-    except (netrc.NetrcParseError, FileNotFoundError) as e:
-        return False, f"Error parsing .netrc: {e}"
-    
-# note on merge conflict change GPSDate -> int
-def retrieve_all_cddis_types(gps_week: int) -> list[str]:
+def get_product_dataframe(start_time: datetime, end_time: datetime, target_files=None) -> pd.DataFrame:
     """
-    Retrieve CDDIS file list for a specific GPS week. Using Html get
-    
-    :param gps_week: int value that represent the GPS week e.g 2052
-
-    :return files: Warning unsanatised this will return all files includeing files in bad format 
+    Retrieves a DataFrame of available products for given time window and target files
+    :param start_time: the start of the time window (use str_to_datetime helper function)
+    :param end_time: the start of the time window (use str_to_datetime helper function)
+    :param target_files: list of target files to filter for, defaulted to ["CLK","BIA","SP3"]
+    :returns: set of valid analysis centers
     """
+    if target_files is None:
+        target_files = ["CLK", "BIA", "SP3"]
 
-    url = f"https://cddis.nasa.gov/archive/gnss/products/{gps_week}/"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        print(f"Failed to fetch files for GPS week {gps_week}: {e}")
-        return []
-    
-    # Parse the HTML links for file names
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(response.text, 'html.parser')
-    
-    files = [a['href'] for a in soup.find_all('a',class_="archiveItemText", href=True) if not a['href'].endswith('/')]
-    return files
+    products = pd.DataFrame(columns=["analysis_center", "project", "date", "solution_type", "period", "resolution", "content", "format"])
 
-# Note create_cddis_file not currently used anywhere
-# if we are going to be do caching  
-# i'll shift the input to be an list of ints
-# and change the output file into a yaml
-def create_cddis_file(filepath: Path, reference_start: GPSDate) -> None:
-    """
-    Create a file named "CDDIS.list" with CDDIS data types for a given reference start time.
-    """
-    data = retrieve_all_cddis_types(reference_start)
-    cddis_file_path = filepath / "CDDIS.list"
+    # 1. Retrieve available options
+    gps_weeks = range(date_to_gpswk(start_time), date_to_gpswk(end_time) + 1)
+    for gps_week in gps_weeks:
+        print(f"[Handler] Retrieving week: {gps_week} ")
+        url = f"https://cddis.nasa.gov/archive/gnss/products/{gps_week}/"
+        try:
+            week_files = requests.get(url, timeout=10)
+            week_files.raise_for_status()
+        except requests.RequestException as e:
+            raise requests.RequestException(f"Failed to fetch files for GPS week {gps_week}: {e}")
 
-    with open(cddis_file_path, "w") as f:
-        for d in data:
+    # 2. Extract data from available options
+        # Only relevant datafile containers are stored in memory
+        soup = BeautifulSoup(week_files.content, "html.parser", parse_only=SoupStrainer("div", class_="archiveItemTextContainer"))
+        for div in soup:
+            filename = div.get_text().split(" ")[0]
             try:
-                time = datetime.strptime(d.split("_")[1], "%Y%j%H%M")
-                f.write(f"{d} {time}\n")
-            except (IndexError, ValueError):
+                if gps_week < 2237:
+                    # Format convention changed in week 2237
+                    # AAAWWWWD.TYP.Z
+                    center = filename[0:3] # e.g. "COD"
+                    _type = "FIN"  # pre-2237 were probably always final solutions :shrug:
+                    day = int(filename[7])  # e.g. "0", 0-indexed, 7 indicates weekly
+                    _format = filename[9:12] # e.g. "snx", "ssc", "sum", "erp"
+                    project = None
+                    sampling_resolution = None
+                    content = None
+                    date = gpswk_to_date(gps_week)
+                    if 0 < day < 7:
+                        date += timedelta(days=day)
+                        period = timedelta(days=1)
+                    else:
+                        period = timedelta(days=7)
+
+                else:
+                    # e.g. GRG0OPSFIN_20232620000_01D_01D_SOL.SNX.gz
+                    # AAA0OPSSNX_YYYYDDDHHMM_LEN_SMP_CNT.FMT.gz
+                    center = filename[0:3] # e.g. "COD"
+                    project = filename[4:7] # e.g. "OPS" or "RNN" unused
+                    _type = filename[7:10] # e.g. "FIN"
+                    year = int(filename[11:15])  # e.g. "2023"
+                    day_of_year = int(filename[15:18]) # e.g. "262"
+                    hour = int(filename[18:20]) # e.g. "00"
+                    minute = int(filename[20:22]) # e.g. "00"
+                    intended_period = filename[23:26]  # eg "01D"
+                    sampling_resolution = filename[27:30] # eg "01D"
+                    content = filename[31:34] # e.g. "SOL"
+                    _format = filename[35:38] # e.g. "SNX"
+
+                    date = datetime(year, 1, 1, hour, minute) + timedelta(day_of_year - 1)
+                    period = timedelta(days=int(intended_period[:-1])) # Assuming all periods are in days :shrug:
+
+                if _format in target_files and start_time <= date <= end_time:
+                    products.loc[len(products)] = {
+                        "analysis_center": center,
+                        "project": project,
+                        "date": date,
+                        "solution_type": _type,
+                        "period": period,
+                        "resolution": sampling_resolution,
+                        "content": content,
+                        "format": _format
+                    }
+            except (ValueError, IndexError) as e:
+                print(f"Skipping irrelevant file: {filename} ({e})")
                 continue
+    products = products.drop_duplicates(inplace=False) # resets indexes too
+    return products
 
-class CDDIS_Handler:
-    def __init__(self,date_time_start_str:str, date_time_end_str:str,target_files = ["CLK","BIA","SP3"]):    
-        """
-        CDDIS object constructor. Requires CDDIS input and date_time input inorder to access getters 
-        :param date_time_end_str: YYYY-MM-DD_HH:mm:ss Path to the CDDIS.list ( on init required for query) e.g 2025-05-01_00:00:00
-        :returns: cddis handeler object 
-        """      
-        self.df             = None     # pd.dataframe of cddis input
-        self.valid_products = None     # pd.dataframe holding valids products
-        self.time_end       = None     # user end time bound
-        self.time_start     = None     # user end time bound
-        self.target_files   = target_files
+def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
+    """
+    Analyzes dataframe for the valid analysis_centers that provide continuous coverage
+    :param start_time: the start of the time window (use str_to_datetime helper function)
+    :param end_time: the start of the time window (use str_to_datetime helper function)
+    :param target_files: list of target files to filter for, defaulted to ["CLK","BIA","SP3"]
+    :returns: set of valid analysis centers
+    """
+    for (center, _type, _format), group in data.groupby(["analysis_center", "solution_type", "format"]):
+        # We only included files within the time window, now just check they're contiguous
+        group = group.sort_values("date").reset_index(drop=True)
+        for i in range(len(group)-1):
+            if group.loc[i]["date"] + group.loc[i]["period"] < group.loc[i+1]["date"]:
+                print(f"Gap detected for {center} { _type} {_format} between {group.loc[i, 'date']} and {group.loc[i+1, 'date']}")
+                data = data[data["analysis_center"] != center and data["solution_type"] != _type and data["format"] != _format]
+                break
 
-        # Note can shift over to YYYY-dddHHmm format if needed through datetime.strptime(date_time,"%Y%j%H%M") 
-        self.time_end = self.__str_to_datetime(date_time_end_str)
-        self.time_start = self.__str_to_datetime(date_time_start_str)       
-        #self.__download_cddis(self.time_start,self.time_end) #potential improvment instaed of writing out into file write into mem buff
-        print("[Handler] Starting download of CDDIS list...")
-        self.__get_cddis_list(self.time_start,self.time_end)
-        print("[Handler] Download of CDDIS list complete.")
-        self.__set_valid_products_df()
-        print("[Handler] Valid products extraction complete.")
+    # 4. Report results
+    centers = set()
+    for analysis_center in data["analysis_center"].unique():
+        centers.add(analysis_center)
+        center_products = data.loc[data["analysis_center"] == analysis_center]
+        center_products = center_products.drop_duplicates(subset=["solution_type", "format"], inplace=False)
+        offerings = ""
+        for _format in center_products["format"].unique():
+            types = center_products.loc[center_products["format"] == _format, "solution_type"].unique()
+            offerings += f"{_format}:({'/'.join(types)}) "
+        print(f"[Handler] {analysis_center} offers: {offerings}")
 
-    def __get_cddis_list(self,start_date_time:datetime,end_date_time:datetime):
-        """
-        PRIVATE METHOD
+    return centers
 
-        gets the list of cddis values as a list populated class data frame
+def download_products(products: pd.DataFrame, download_dir: Path = Path("./downloads"), progress_callback=None,
+                      log_callback=None, yield_progress: bool = False,
+):
+    """
+    Downloads all products in the provided DataFrame to the specified directory.
 
-        :param start_date_time: datetime object
-        :param end_date_time: datetime object 
-        """
-        gps_start_week = GPSDate(np.datetime64(start_date_time))
-        gps_end_week   = GPSDate(np.datetime64(end_date_time))
-        # data is stored in weekly format i.e /gps_week(num)/data
-        gps_weeks      = list(range(int(gps_start_week.gpswk), 
-            int(gps_end_week.gpswk) + 1))
-        cddis_list = []
-        ########
-        # potential multi thread area
-        # make a bunch of seperate calls then 
-        try:
-            for gps_week in gps_weeks: 
-               print(f"[Handler] Downloading CDDIS list for week: {gps_week} ")
-               cddis_list += retrieve_all_cddis_types(gps_week)
-        except:
-            raise TimeoutError("CDDIS download timedout")
-        # semaphor lock until all return 
-        
-        self.__df_parse_cddis_str_array(cddis_list)
+    :param products : DataFrame containing product metadata to download
+    :param download_dir: Directory to save downloaded files
+    :param progress_callback: Optional callback function for progress updates (filename, percent)
+    :param log_callback: Optional callback function for log messages (message)
+    :param yield_progress: If True, function acts as a generator yielding (filename, percent) tuples
+    :returns: None if not in generator mode; otherwise yields (filename, percent) tuples
+    """
+    download_dir.mkdir(parents=True, exist_ok=True)
+    session = requests.Session()
+    session.auth = get_netrc_auth()
 
+    if log_callback:
+        log_callback(f"📦 Found {len(products)} files to download")
+    else:
+        print(f"📦 Found {len(products)} files to download")
 
-        
-
-    def __str_to_datetime(self, date_time_str):
-        """
-        PRIVATE METHOD
-
-        :param date_time_str: YYYY-MM-DD_HH:mm:ss
-        :returns datetime: datetime.strptime()
-        """
-        # Note can shift over to YYYY-dddHHmm format if needed through datetime.strptime(date_time,"%Y%j%H%M") 
-        try: 
-            return datetime.strptime(date_time_str, "%Y-%m-%d_%H:%M:%S")
-        except ValueError:             
-            raise ValueError("Invalid datetime format. Use YYYY-MM-DDTHH:MM (e.g. 2025-05-01_00:00:00)")
-
-    def __df_parse_cddis_str_array(self, cddis_str_array:list[str]):
-        """
-        PRIVATE METHOD
-
-
-        Generates an pd data frame. 
-        
-        :param cddis_str_array: input array of line str containg following 
-        pattern COD0MGXFIN_20250960000_01D_01D_OSB 
-        :returns: None (updates the objects data frame) 
-        """  
-        # INPUT 
-        # COD0MGXFIN_20250960000_01D_01D_OSB.BIA.gz 2025:04:17 10:38:56    63.19KB
-        # Most important will be 
-        # COD0MGXFIN_20250960000
-        # the trailing will be mostly ignored.
-        # re.compile(r'^([A-Z0-9]{3})[0-9]([A-Z]{3})([A-Z]{3})_(\d{11})')
-        # regex to extract from list 
-        # analysis_center    3  char
-        # 0                  1  padding   
-        # project_type       3  char
-        # solution_type      3  char
-        # date yyyydddhhmm   11 char 
-        #
-        #
-        # <*> . matches 
-        #pattern = re.compile(r'^([A-Z0-9]{3})[0-9]([A-Z]{3})([A-Z]{3})_(\d{11})_.{3}_.{3}_.{3}.([A-Z]{3})')
-        pattern = re.compile(r'^([A-Z0-9]{3})[0-9]([A-Z]{3})([A-Z]{3})_(\d{11})_([0-9]{2})._([0-9]{2})._.{3}.([A-Z0-9]{3})')
-        
-        parsed_data = []
-
-        for line in cddis_str_array:
-
-            parts = line.strip().split()        
-            if not parts:
-                # malformed input
-                continue 
-            filename = parts[0]
-
-            match = pattern.match(filename)
-            if match:
-                    analysis_center, project_type, solution_type, end_validity_str,duration,sample_rate, file_type = match.groups()
-                    try:
-                        end_datetime = datetime.strptime(end_validity_str, "%Y%j%H%M") #yyyydddhhmm
-                        duration = timedelta(int(duration))
-                        parsed_data.append({
-                            "analysis_center": analysis_center,
-                            "project_type": project_type,
-                            "solution_type": solution_type,
-                            "end_validity": end_datetime,
-                            "file_type": file_type,
-                            "duration": duration,
-                            "filename": filename
-                        })
-                    except ValueError:                        
-                        continue
-        self.df = pd.DataFrame(parsed_data)
-
-    def __parse_product_list_file(self, file_path:str):
-        """
-        PRIVATE METHOD
-
-        Generates an pd data frame. 
-        
-        :param file_path: Path to the CDDIS.list
-        :returns: None (updates the objects cddis dataframe)
-        """  
-        try: 
-            with open(file_path, 'r') as file:
-                lines = file.readlines()
-        except (FileNotFoundError, IOError):
-            # ERROR HANDLING 
-            #print("Wrong file or file path")
-            raise Exception("cddis_handler __parse_product_list_file: Wrong file or file path")
-
-        self.__df_parse_cddis_str_array(lines)
-    
-    def __set_valid_products_df(self):
-        """
-        PRIVATE METHOD
-
-        Sets the valid products data frame if valid date time and cddis data frame is available in object. 
-        Is called after some value has been set in object. Will then update valid_products data frame 
-        """
-        if(self.time_end != None and 
-           not isinstance(self.df, type(None))
-           ):
-            self.valid_products = self.get_valid_products_by_datetime(date_time_start=self.time_start,date_time_end=self.time_end,target_files=self.target_files)
-                    
-    def set_date_time(self,date_time_start_str:str,date_time_end_str:str):
-        """
-        method will set cddis internals. based on provided date time 
-        If the object has been given an date time then it will also populate 
-        the objects valid products data frame.  
-
-        :param date_time_end_str: YYYY-MM-DDTHH:MM (e.g. 2025-04-14T01:30) 
-
-        :returns: None (updates object internals)
-        """
-        
-        # should really create a dedicated helper function for this 
-        self.time_end = self.__str_to_datetime(date_time_start_str)
-        self.time_end = self.__str_to_datetime(date_time_end_str)
-        self.__get_cddis_list(self.time_start,self.time_end)
-        self.__set_valid_products_df()
-        
-    def get_valid_products_by_datetime(self, date_time_start:datetime = None, date_time_end:datetime = None, target_files:list[str] = None):
-        """
-        gets a dataframe of valid products by datetime based on input date time and object CDDIS list
-
-        :param date_time_start: datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M")
-        :param date_time_end: datetime.strptime(date_time_str, "%Y-%m-%dT%H:%M")
-        :returns valid_products: pd.df of valid products in ({"analysis_center": [], "analysis_center": [(project_type,solution_type)]}) if no valids then return empty df
-        """
-
-        # upper boundary prune         
-        products = self.df[(self.df["end_validity"]+self.df["duration"] >= date_time_end)]
-        #products = self.df
-        #print(products["file_type"].unique())
-        #print(products["files_types"])
-        
-        product_tuples = defaultdict(set)
-        for _, row in products.iterrows():
-            product_tuples[
-                row["analysis_center"]].add(
-                    (row["project_type"], row["solution_type"])
-                    )
-
-        
-        product_tuples = pd.DataFrame([
-            {"analysis_center": k, "available_types": sorted(list(v))}
-            for k, v in product_tuples.items()
-        ])
-        # lower bound checks
-        # validation downwards
-        
-        products = self.df[(self.df["end_validity"] <= date_time_start)]
-        
-        valid_products = defaultdict(set)
-        
-        for _, row in product_tuples.iterrows():
-            for project_type,solution_type in row["available_types"]:
-                
-                selected_rows_valid = True
-
-                selected_rows = products.loc[(products["analysis_center"] == row["analysis_center"]) & 
-                           (products['project_type'] == project_type) & 
-                           (products['solution_type'] == solution_type)]
-    
-                for time in selected_rows["end_validity"].unique():
-                    # getting products part of set
-                    selected_product_set = selected_rows.loc[(selected_rows["end_validity"] == time)]
-                    files_types = selected_product_set["file_type"].unique()
-                    # check for target files 
-                    for target_file in target_files:
-                        if not(target_file in files_types):
-                            selected_rows_valid = False
-                            break
-
-                    if(not selected_rows_valid):
-                        break
-
-                # project anaylsis_center project_type solution_type
-                # typle has missing file/s
-                if (selected_rows_valid):
-                    valid_products[
-                        row["analysis_center"]].add(
-                            (project_type, solution_type)
-                            )
-
-        valid_products = pd.DataFrame([
-            {"analysis_center": k, "available_types": sorted(list(v))}
-            for k, v in valid_products.items()
-        ])
-        
-        if(valid_products.empty):
-            raise RuntimeError("no valid product tuple found for input datetime") 
-
-        return valid_products
-    
-    def get_list_of_valid_analysis_centers(self) -> list[str]:
-        """
-        outputs a list str of valid analysis centers
-
-        :param: None
-        :return list[str]: list string of valid analysis centers
-        """
-        print(f"[Handler] Available analysis centers: {sorted(self.df['analysis_center'].unique())}")
-        return self.valid_products["analysis_center"].unique()
-
-
-    def get_df_of_valid_types_tuples(self,analysis_center:str):
-        """
-        outputs a pandas data frame of valid tuple pairings of project-type solution-type 
-        for given analysis_center  
-
-        :param analysis_center: target analysis center  
-        :return: pd.df in form of ({project-type: str,solution-type str) 
-        """
-        #long boi
-        tuple_array = self.valid_products.loc[self.valid_products["analysis_center"]==analysis_center].iloc[0]["available_types"]      
-        df = pd.DataFrame(tuple_array, columns=['project-type','solution-type'])
-        return df
-    
-    def get_list_of_valid_project_types(self,analysis_center:str) -> list[str]:
-        """
-        outputs a list string of valid_project_types
-
-        :param analysis_center: target analysis center  
-        :return: list string of valid_project_types
-        """
-        df = self.get_df_of_valid_types_tuples(analysis_center)
-        return df['project-type'].unique().tolist() 
-
-    def get_list_of_valid_solution_types(self,analysis_center:str)-> list[str]:
-        """
-        outputs a list string of valid_solution_types
-
-        :param analysis_center: target analysis center  
-        :return: list string of valid_solution_types
-        """
-        if self.df.empty:
-            return []
-        try:
-            df = self.get_df_of_valid_types_tuples(analysis_center)
-            return df['solution-type'].unique().tolist() 
-        except Exception as e:
-            print(f"[CDDIS_Handler] Error getting solution types: {e}")
-            return []
-
-    def is_valid_project_solution_tuple(self, analysis_center:str, project_type:str, solution_type:str):
-        """
-        Verification of sanatised user input of analysis_center project_type solution_type
- 
-        :param analysis_center: user input analysis_center
-        :param project_type:    user input project_type
-        :param solution_type:   user input solution_type
-        
-        :return: bool valid if user input is valid
-        """
-        df_valid_tuples = self.get_df_of_valid_types_tuples(analysis_center)
-            
-        is_empty = df_valid_tuples[(df_valid_tuples["project-type"] == project_type) & 
-                        (df_valid_tuples['solution-type'] == solution_type)].empty
-        
-        #if empty then invalid  if not then valid
-        return not is_empty
-
-    def get_optimal_project_solution_tuple(self,analysis_center:str,satellite_constellations = None) -> tuple[str, str]:
-                
-        """
-        From available valids from selected anaylis_center
-        solution_type_priorities FIN -> RAP -> ULT  
-        Future proof satellite_constellations will help determine the project_type 
-
-        :param analysis_center: target analysis center
-        :param satellite_constellations: NOT IMPLEMENTED
-        :return: on success (project_type,solution_type) else (None,None)
-        """
-        # place holder for future proofing for yaml read in 
-        # logic for determining project_type priorites
-        # probably store some sort of tuple set in resourses folder
-        project_type_priorities = None
-        if(not satellite_constellations):
-            project_type_priorities = ["MGX","OPS"] # "OPS","DEM"
+    for _, row in products.iterrows():
+        gps_week = date_to_gpswk(row.date)
+        if gps_week < 2237:
+            # AAAWWWWD.TYP.Z
+            # e.g. COD22360.FIN.SNX.gz
+            if row.period == timedelta(days=7):
+                day = 7
+            else:
+                day = int((row.date - gpswk_to_date(gps_week)).days)
+            filename = f"{row.analysis_center}{gps_week}{day}.{row.format}.gz"
         else:
-            raise NotImplementedError("satellite_constellations used in  project_type_priorities not implemented yet")
-        
-        solution_type_priorities = ["FIN","RAP","ULT"]
-        
-    
-        priority_mapping = None
+            # e.g. GRG0OPSFIN_20232620000_01D_01D_SOL.SNX.gz
+            # AAA0OPSSNX_YYYYDDDHHMM_LEN_SMP_CNT.FMT.gz
+            filename = f"{row.analysis_center}0{row.project}{row.solution_type}_{row.date.strftime('%Y%j%H%M')}_{row.period.days:02d}D_{row.resolution}_{row.content}.{row.format}.gz"
 
-        df_valid_tuples = self.get_df_of_valid_types_tuples(analysis_center)
-
-        for project_type_priority in project_type_priorities:
-            valid_solution_types = df_valid_tuples[(df_valid_tuples["project-type"] == project_type_priority)]['solution-type'].to_list()
-            for solution_type_priority in solution_type_priorities:
-                if(solution_type_priority in valid_solution_types):
-                    return project_type_priority,solution_type_priority
-                           
-        return None,None
-
-    def download_products(
-            self,
-            analysis_center: str,
-            project_type: str,
-            solution_type: str,
-            start_time: datetime,
-            end_time: datetime,
-            target_files: list[str] = None,
-            download_dir: Path = Path("./downloads"),
-            progress_callback=None,
-            log_callback=None,
-            yield_progress: bool = False,
-        ):
-        """
-        Downloads all matching CDDIS GNSS products for the specified parameters and time window.
-        Retries on failure, resumes partial downloads using `.part` files.
-   
-        Modes:
-          - Default: blocking call, returns None. Optional progress_callback(filename, percent).
-          - yield_progress=True: acts as a generator yielding (filename, percent).
-        """
-        download_dir.mkdir(parents=True, exist_ok=True)
-        session = requests.Session()
-        session.auth = netrc.netrc().authenticators("urs.earthdata.nasa.gov")[:2]
-
-        matching = self.df[
-            (self.df["analysis_center"] == analysis_center) &
-            (self.df["project_type"] == project_type) &
-            (self.df["solution_type"] == solution_type)
-        ].copy()
-
-        matching["valid_start"] = matching["end_validity"]
-        matching["valid_end"] = matching["end_validity"] + matching["duration"]
-
-        matching = matching[
-            (matching["valid_start"] < end_time) &
-            (matching["valid_end"] > start_time)
-        ]
-
-        if target_files:
-            matching = matching[matching["file_type"].isin(target_files)]
-
+        url = f"{BASE_URL}/gnss/products/{gps_week}/{filename}"
         if log_callback:
-            log_callback(f"📦 Found {len(matching)} matching files to download")
+            log_callback(f"[Handler] Preparing to download: {url}")
         else:
-            print(f"📦 Found {len(matching)} matching files to download")
+            print(f"[Handler] Preparing to download: {url}")
 
-        for _, row in matching.iterrows():
-            filename = row["filename"]
-            gps_week = GPSDate(np.datetime64(row["end_validity"])).gpswk
-            url = f"{BASE_URL}/gnss/products/{gps_week}/{filename}"
+        final_file = download_dir / filename
+        partial_file = final_file.with_suffix(final_file.suffix + ".part")
+        decompressed_path = final_file.with_suffix('') if final_file.suffix == ".gz" else final_file
 
-            final_file = download_dir / filename
-            partial_file = final_file.with_suffix(final_file.suffix + ".part")
-            decompressed_path = final_file.with_suffix('') if final_file.suffix == ".gz" else final_file
+        # Already exists?
+        if decompressed_path.exists():
+            msg = f"✅ Skipping (already exists): {decompressed_path.name}"
+            log_callback(msg) if log_callback else print(msg)
+            continue
 
-            # Already exists?
-            if decompressed_path.exists():
-                msg = f"✅ Skipping (already exists): {decompressed_path.name}"
+        # Existing .gz but not decompressed
+        if final_file.exists() and final_file.suffix == ".gz":
+            try:
+                with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                final_file.unlink()
+                msg = f"🗜️ Decompressed existing: {decompressed_path.name}"
                 log_callback(msg) if log_callback else print(msg)
                 continue
+            except Exception as e:
+                msg = f"❌ Failed to decompress existing {final_file.name}: {e}"
+                log_callback(msg) if log_callback else print(msg)
 
-            # Existing .gz but not decompressed
-            if final_file.exists() and final_file.suffix == ".gz":
-                try:
+        # --- Retry & resume loop ---
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                headers = {}
+                mode = "wb"
+                existing_size = 0
+
+                if partial_file.exists():
+                    existing_size = partial_file.stat().st_size
+                    if existing_size > 0:
+                        headers = {"Range": f"bytes={existing_size}-"}
+                        mode = "ab"
+                        msg = f"↪️ Resuming {filename} from byte {existing_size}"
+                        log_callback(msg) if log_callback else print(msg)
+
+                msg = f"⬇️ Downloading: {filename} (attempt {attempt}/{MAX_RETRIES})"
+                log_callback(msg) if log_callback else print(msg)
+
+                response = session.get(url, headers=headers, stream=True, timeout=30)
+                with response as r:
+                    if r.status_code == 416:  # Range beyond EOF → treat as complete
+                        msg = f"⚠️ Server says {filename} already complete."
+                        log_callback(msg) if log_callback else print(msg)
+                        break
+                    r.raise_for_status()
+
+                    total_size = int(r.headers.get("Content-Length", 0)) + existing_size
+                    downloaded = existing_size
+
+                    with open(partial_file, mode) as f:
+                        for chunk in r.iter_content(512 * 512):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+
+                                percent = int(downloaded * 100 / total_size) if total_size > 0 else 100
+                                if progress_callback:
+                                    progress_callback(filename, percent)
+                                if yield_progress:
+                                    yield filename, percent
+
+                # Rename partial → final
+                partial_file.rename(final_file)
+
+                # Decompress if needed
+                if final_file.suffix == ".gz":
                     with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
                         shutil.copyfileobj(f_in, f_out)
                     final_file.unlink()
-                    msg = f"🗜️ Decompressed existing: {decompressed_path.name}"
-                    log_callback(msg) if log_callback else print(msg)
-                    continue
-                except Exception as e:
-                    msg = f"❌ Failed to decompress existing {final_file.name}: {e}"
+                    msg = f"🗜️ Decompressed to: {decompressed_path.name}"
                     log_callback(msg) if log_callback else print(msg)
 
-            # --- Retry & resume loop ---
-            for attempt in range(1, MAX_RETRIES + 1):
-                try:
-                    headers = {}
-                    mode = "wb"
-                    existing_size = 0
- 
+                # ✅ per-file completion log
+                msg = f"✅ Finished downloading {decompressed_path.name}"
+                log_callback(msg) if log_callback else print(msg)
+
+                break  # success, exit retry loop
+
+            except Exception as e:
+                if attempt == MAX_RETRIES:
+                    msg = f"❌ Failed to download {filename} after {MAX_RETRIES} attempts: {e}"
+                    log_callback(msg) if log_callback else print(msg)
                     if partial_file.exists():
-                        existing_size = partial_file.stat().st_size
-                        if existing_size > 0:
-                            headers = {"Range": f"bytes={existing_size}-"}
-                            mode = "ab"
-                            msg = f"↪️ Resuming {filename} from byte {existing_size}"
-                            log_callback(msg) if log_callback else print(msg)
-
-                    msg = f"⬇️ Downloading: {filename} (attempt {attempt}/{MAX_RETRIES})"
+                        partial_file.unlink()
+                else:
+                    wait = 5 * attempt
+                    msg = f"⚠️ Download failed ({e}), retrying in {wait}s..."
                     log_callback(msg) if log_callback else print(msg)
+                    time.sleep(wait)
+                    continue  # retry same file
 
-                    response = session.get(url, headers=headers, stream=True, timeout=30)
-                    with response as r:
-                        if r.status_code == 416:  # Range beyond EOF → treat as complete
-                            msg = f"⚠️ Server says {filename} already complete."
-                            log_callback(msg) if log_callback else print(msg)
-                            break
-                        r.raise_for_status()
-
-                        total_size = int(r.headers.get("Content-Length", 0)) + existing_size
-                        downloaded = existing_size
-
-                        with open(partial_file, mode) as f:
-                            for chunk in r.iter_content(CHUNK_SIZE):
-                                if chunk:
-                                    f.write(chunk)
-                                    downloaded += len(chunk)
-
-                                    percent = int(downloaded * 100 / total_size) if total_size > 0 else 100
-                                    if progress_callback:
-                                        progress_callback(filename, percent)
-                                    if yield_progress:
-                                        yield (filename, percent)
-
-                    # Rename partial → final
-                    partial_file.rename(final_file)
-
-                    # Decompress if needed
-                    if final_file.suffix == ".gz":
-                        with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                        final_file.unlink()
-                        msg = f"🗜️ Decompressed to: {decompressed_path.name}"
-                        log_callback(msg) if log_callback else print(msg)
-
-                    # ✅ per-file completion log
-                    msg = f"✅ Finished downloading {decompressed_path.name}"
-                    log_callback(msg) if log_callback else print(msg)
-
-                    break  # success, exit retry loop
-
-                except Exception as e:
-                    if attempt == MAX_RETRIES:
-                        msg = f"❌ Failed to download {filename} after {MAX_RETRIES} attempts: {e}"
-                        log_callback(msg) if log_callback else print(msg)
-                        if partial_file.exists():
-                            partial_file.unlink()
-                    else:
-                        wait = RETRY_DELAY * attempt
-                        msg = f"⚠️ Download failed ({e}), retrying in {wait}s..."
-                        log_callback(msg) if log_callback else print(msg)
-                        time.sleep(wait)
-                        continue   # retry same file
-
-        # In generator mode, function is already exhausted by the caller
-        if not yield_progress:
-            return None
-
-
-if __name__ == "__main__":
-    my_cddis = CDDIS_Handler(date_time_start_str="2023-09-16_00:00:00", date_time_end_str="2023-09-17_12:00:00") # will filter for target files ["CLK","BIA","SP3"]
-
-    print(my_cddis.df)
-    print(my_cddis.valid_products)
-    print(my_cddis.get_list_of_valid_analysis_centers())
-    print(my_cddis.get_df_of_valid_types_tuples("COD"))
-    print(my_cddis.get_list_of_valid_project_types("COD"))
-    print(my_cddis.get_list_of_valid_solution_types("COD"))
-    print(my_cddis.is_valid_project_solution_tuple("COD","MGX","FIN"))
-    print(my_cddis.get_optimal_project_solution_tuple("COD"))
-    print(my_cddis.time_end)
-    my_cddis.download_products(
-    analysis_center="COD",
-    project_type="MGX",
-    solution_type="FIN",
-    start_time=datetime(2023, 9, 16, 0, 0),
-    end_time=datetime(2023, 9, 17, 12, 0),
-    target_files=["BIA", "CLK", "SP3"], 
-    download_dir=Path("./downloads")
-)
+    # In generator mode, function is already exhausted by the caller
+    if not yield_progress:
+        return None
 

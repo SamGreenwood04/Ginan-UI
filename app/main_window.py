@@ -11,7 +11,7 @@ from app.utils.ui_compilation import compile_ui
 from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
 from app.utils.cddis_email import get_username_from_netrc, write_email, test_cddis_connection
-from app.utils.download_products_https import start_metadata_download_thread
+from app.utils.download_products_https import start_metadata_download_thread, download_pea_auxiliary_products
 from app.utils.workers import PeaExecutionWorker, PPPDownloadWorker
 from app.utils.archive_manager import archive_products_if_selection_changed
 from app.models.execution import INPUT_PRODUCTS_PATH
@@ -128,10 +128,6 @@ class MainWindow(QMainWindow):
         project = self.ui.PPP_project.currentText()
         series = self.ui.PPP_series.currentText()
 
-        # Time window comes from InputController
-        start_time = self.inputCtrl.start_time
-        end_time = self.inputCtrl.end_time
-
         # Archive old products if needed
         current_selection = {"ppp_provider": ac, "ppp_project": project, "ppp_series": series}
         archive_dir = archive_products_if_selection_changed(
@@ -141,21 +137,21 @@ class MainWindow(QMainWindow):
         if archive_dir:
             self.log_message(f"📦 Archived old PPP products → {archive_dir}")
 
+        # List products to be downloaded
+        x = self.inputCtrl.products_df
+        products = x.loc[(x["analysis_center"] == ac) & (x["project"] == project) & (x["solution_type"] == series)].drop_duplicates()
+
         # Reset progress
         self.download_progress.clear()
 
         # Start download in background
         self.download_thread = QThread()
         self.download_worker = PPPDownloadWorker(
-            handler=self.inputCtrl.cddis_handler,
-            analysis_center=ac,
-            project_type=project,
-            solution_type=series,
-            start_time=start_time,
-            end_time=end_time,
-            target_files=["SP3", "CLK", "BIA"],
+            products=products,
             download_dir=INPUT_PRODUCTS_PATH,
             execution=self.execution,
+            start_epoch=self.inputCtrl.start_time,
+            end_epoch=self.inputCtrl.end_time,
         )
         self.download_worker.moveToThread(self.download_thread)
 

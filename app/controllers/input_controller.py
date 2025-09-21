@@ -9,6 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List
 
+import pandas as pd
+
+from app.models.cddis_handler import get_valid_analysis_centers, str_to_datetime
 from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QRunnable, Slot, QThreadPool
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
@@ -32,7 +35,6 @@ from app.models.execution import Execution, GENERATED_YAML, TEMPLATE_PATH, INPUT
 from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
 from app.utils.archive_manager import (archive_products_if_rinex_changed, archive_products_if_selection_changed)
-from app.models.cddis_handler import CDDIS_Handler
 from app.utils.archive_manager import archive_old_outputs
 from app.utils.workers import CDDISWorker
 
@@ -64,7 +66,7 @@ class InputController(QObject):
 
         self.rnx_file: str = ""
         self.output_dir: str = ""
-        self.cddis_handler = None  # Default until set via RNX
+        self.products_df: pd.DataFrame = pd.DataFrame() # CDDIS replaces with a populated dataframe
 
         # Config file path
         self.config_path = GENERATED_YAML
@@ -158,7 +160,7 @@ class InputController(QObject):
             #    print("[SYNC TEST ERROR]", e)
 
             # Kick off CDDIS PPP products query in background thread
-            worker = CDDISWorker(result['start_epoch'], result['end_epoch'], result)
+            worker = CDDISWorker(str_to_datetime(result['start_epoch']), str_to_datetime(result['end_epoch']))
             worker.signals.finished.connect(self._on_cddis_ready)
             worker.signals.error.connect(self._on_cddis_error)
             QThreadPool.globalInstance().start(worker)
@@ -264,15 +266,9 @@ class InputController(QObject):
         combo.lineEdit().setText(", ".join(constellations))
         self.ui.constellationsValue.setText(", ".join(constellations))
 
-    def _on_cddis_ready(self, handler: CDDIS_Handler, result: dict):
-        self.cddis_handler = handler
-
-        try:
-            self.valid_analysis_centers = handler.get_list_of_valid_analysis_centers()
-
-        except Exception as e:
-            self.valid_analysis_centers = []
-            print(f"[CDDIS] Error accessing analysis centers: {e}")
+    def _on_cddis_ready(self, data: pd.DataFrame):
+        self.products_df = data
+        self.valid_analysis_centers = list(get_valid_analysis_centers(self.products_df))
 
         if len(self.valid_analysis_centers) == 0:
             self.ui.terminalTextEdit.append("⚠️ No valid PPP providers found.")
@@ -290,7 +286,6 @@ class InputController(QObject):
 
         # Update PPP_series based on default PPP_provider
         self._on_ppp_provider_changed(self.valid_analysis_centers[0])
-
         self.ui.terminalTextEdit.append(f"✅ CDDIS archive scan complete. Found PPP product providers: {', '.join(self.valid_analysis_centers)}")
 
     def _on_cddis_error(self, msg):
@@ -300,16 +295,11 @@ class InputController(QObject):
 
     def _on_ppp_provider_changed(self, provider_name: str):
         if not provider_name or provider_name.strip() == "":
-            print("[Warning] No PPP provider selected — ignoring update.")
+            print("[Warning] No PPP provider selected — isgnoring update.")
             return
-
-        if not self.cddis_handler:
-            print("[Info] CDDIS handler not initialized yet.")
-            return
-
         try:
             # Get DataFrame of valid (project, series) pairs
-            df = self.cddis_handler.get_df_of_valid_types_tuples(provider_name)
+            df = self.products_df.loc[self.products_df["analysis_center"] == provider_name, ["project", "solution_type"]]
 
             if df.empty:
                 raise ValueError(f"No valid project–series combinations for provider: {provider_name}")
@@ -317,8 +307,8 @@ class InputController(QObject):
             # Store for future filtering if needed
             self._valid_project_series_df = df
 
-            project_options = sorted(df['project-type'].unique())
-            series_options = sorted(df['solution-type'].unique())
+            project_options = sorted(df['project'].unique())
+            series_options = sorted(df['solution_type'].unique())
 
             self.ui.PPP_project.clear()
             self.ui.PPP_series.clear()
@@ -345,8 +335,8 @@ class InputController(QObject):
             return
 
         df = self._valid_project_series_df
-        filtered_df = df[df["solution-type"] == selected_series]
-        valid_projects = sorted(filtered_df["project-type"].unique())
+        filtered_df = df[df["solution_type"] == selected_series]
+        valid_projects = sorted(filtered_df["project"].unique())
 
         self.ui.PPP_project.blockSignals(True)
         self.ui.PPP_project.clear()
@@ -361,8 +351,8 @@ class InputController(QObject):
             return
 
         df = self._valid_project_series_df
-        filtered_df = df[df["project-type"] == selected_project]
-        valid_series = sorted(filtered_df["solution-type"].unique())
+        filtered_df = df[df["project"] == selected_project]
+        valid_series = sorted(filtered_df["solution_type"].unique())
 
         self.ui.PPP_series.blockSignals(True)
         self.ui.PPP_series.clear()
