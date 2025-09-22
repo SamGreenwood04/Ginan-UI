@@ -1,6 +1,6 @@
 import unittest
 from pathlib import Path
-from app.utils.find_executable import get_pea_exec
+from app.models.execution import get_pea_exec
 from importlib.resources import files
 import subprocess
 

@@ -1,6 +1,9 @@
 import os
+import platform
 import shutil
 import subprocess
+from importlib.resources import files
+
 from ruamel.yaml.scalarstring import PlainScalarString
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from pathlib import Path
@@ -8,10 +11,31 @@ from app.utils.yaml import load_yaml, write_yaml, normalise_yaml_value
 from app.utils.plot_pos import plot_pos_files
 from app.utils.common_dirs import GENERATED_YAML, TEMPLATE_PATH, INPUT_PRODUCTS_PATH
 
+def get_pea_exec():
+    # AppImage works natively
+    if platform.system().lower() == "linux":
+        executable = files('app.resources').joinpath('ginan.AppImage')
+
+    # PEA available on PATH
+    elif shutil.which("pea"):
+        executable = "pea"
+
+    elif platform.system().lower() == "darwin":
+        executable = files('app.resources.osx_arm64.bin').joinpath('pea')
+
+    elif platform.system().lower() == "windows":
+        raise RuntimeError("No binary for windows available")
+
+    # Unknown system
+    else:
+        raise RuntimeError("Unsupported platform: " + platform.system())
+
+    return executable
+
 class Execution:
-    def __init__(self, executable, config_path: Path=GENERATED_YAML):
+    def __init__(self, config_path: Path=GENERATED_YAML):
         self.config_path = config_path
-        self.executable = executable # the PEA executable
+        self.executable = get_pea_exec() # the PEA executable
         self.changes = False # Flag to track if config has been changed
 
         template_file = Path(TEMPLATE_PATH)

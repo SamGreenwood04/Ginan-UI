@@ -3,21 +3,23 @@ import shutil
 import subprocess
 import unittest
 from importlib.resources import files
+from pathlib import Path
+
 from app.models.execution import Execution
-from app.utils.find_executable import get_pea_exec
+
 
 class TestExecution(unittest.TestCase):
     def test_load_sample_config(self):
-        execution = Execution(executable=get_pea_exec(), config_path=str(files("tests.resources").joinpath("ppp_example.yaml")))
+        execution = Execution(config_path=Path(files("tests.resources").joinpath("ppp_example.yaml")))
         self.assertFalse(execution.config.values() == {}, "Caches ppp_example config from tests/resources/ppp_example.yaml")
 
     def test_copies_template_config(self):
-        test_config_path = str(files("tests.resources").joinpath("non_existent.yaml"))
-        if os.path.isfile(test_config_path):
-            os.remove(test_config_path)
-        self.assertFalse(os.path.isfile(test_config_path), "tests/resources/non_existent.yaml shouldn't exist prior to test")
-        Execution(executable=get_pea_exec(), config_path=str(files("tests.resources").joinpath("non_existent.yaml")))
-        self.assertTrue(os.path.isfile(test_config_path), "tests/resources/non_existent.yaml should be created by execution")
+        test_config_path = files("tests.resources").joinpath("non_existent.yaml")
+        if os.path.isfile(str(test_config_path)):
+            os.remove(str(test_config_path))
+        self.assertFalse(os.path.isfile(str(test_config_path)), "tests/resources/non_existent.yaml shouldn't exist prior to test")
+        Execution(config_path=Path(files("tests.resources").joinpath("non_existent.yaml")))
+        self.assertTrue(os.path.isfile(str(test_config_path)), "tests/resources/non_existent.yaml should be created by execution")
 
 
     def test_execute_ppp_example_config(self):
@@ -34,7 +36,7 @@ class TestExecution(unittest.TestCase):
         if not len(os.listdir(product_folder)) > 3:
             subprocess.call("./getProducts.sh", shell=True, text=True, cwd=product_folder)
 
-        execution = Execution(get_pea_exec(), sample_config)
+        execution = Execution(Path(sample_config))
 
         # Clears output folder
         for filename in os.listdir(output_folder):

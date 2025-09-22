@@ -6,7 +6,6 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QTextCursor
 from app.utils.cddis_credentials import validate_netrc as gui_validate_netrc
 from app.models.execution import Execution
-from app.utils.find_executable import get_pea_exec
 from app.utils.ui_compilation import compile_ui
 from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
@@ -51,7 +50,7 @@ class MainWindow(QMainWindow):
         self.log_signal.connect(self.log_message)
 
         # Controllers
-        self.execution = Execution(executable=get_pea_exec())
+        self.execution = Execution()
         self.inputCtrl = InputController(self.ui, self, self.execution)
         self.visCtrl = VisualisationController(self.ui, self)
 
