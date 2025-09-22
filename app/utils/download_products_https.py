@@ -1,9 +1,6 @@
-import json
 import threading
 from datetime import datetime
-from PyQt6.QtCore import QThread
 from bs4 import BeautifulSoup
-
 from app.utils.common_dirs import INPUT_PRODUCTS_PATH
 from app.utils.gn_functions import GPSDate
 from app.utils.yaml import load_yaml
@@ -11,6 +8,7 @@ import numpy as np
 import netrc
 import requests
 from pathlib import Path
+from typing import Optional, List  # Python 3.9-compatible generics
 from app.utils.auto_download_PPP import (
     download_atx,
     download_ocean_loading_model,
@@ -21,12 +19,14 @@ from app.utils.auto_download_PPP import (
     download_planetary_ephemerides_file,
     download_trop_model,
     download_satellite_metadata_snx,
-    download_yaw_files, download_brdc
+    download_yaw_files, 
+    download_brdc
 )
 
 BASE_URL = "https://cddis.nasa.gov/archive"
 
-def download_file(file_url, download_dir: Path=INPUT_PRODUCTS_PATH, overwrite_file: bool=False) -> Path | None:
+
+def download_file(file_url: str, download_dir: Path = INPUT_PRODUCTS_PATH, overwrite_file: bool = False) -> Optional[Path]:
     output_path = Path(download_dir / file_url.split("/")[-1])
     if output_path.exists() and not overwrite_file:
         print(f"❌ File already downloaded: {output_path}")
@@ -59,7 +59,6 @@ def download_metadata(terminal_callback=None):
     tables_dir = INPUT_PRODUCTS_PATH / "tables"
     trop_dir = INPUT_PRODUCTS_PATH / "tables"
     trop_model = "gpt2"
-    long_filename = False
     if_file_present = "dont_replace"
 
     log("🌐 Starting auxiliary metadata download...")
@@ -131,15 +130,7 @@ def download_metadata2(terminal_callback=None):
 
     log("✅ All required metadata files downloaded (or already present).")
 
-def download_iau2000_eop_from_url(download_dir: Path, if_file_present: str = "dont_repalce"):
-    """
-    Downloads the IAU2000 EOP file directly from IERS datacenter latest version URL,
-    unless it already exists and skipping is requested.
-
-    :param download_dir: The directory where the file will be saved
-    :param if_file_present: "skip", "replace", or "error"
-    :return: Path to the downloaded file or None if skipped/failed
-    """
+def download_iau2000_eop_from_url(download_dir: Path, if_file_present: str = "dont_repalce") -> Optional[Path]:
     url = "https://datacenter.iers.org/data/latestVersion/finals.data.iau2000.txt"
     output_path = download_dir / "finals.data.iau2000.txt"
 
@@ -244,11 +235,7 @@ def validate_netrc(machine="urs.earthdata.nasa.gov") -> bool:
         print(f"❌ Error parsing .netrc: {e}")
         return False
 
-
-def retrieve_all_cddis_types(gps_week: int) -> list[str]:
-    """
-    Retrieve CDDIS file list for a specific GPS week.
-    """
+def retrieve_all_cddis_types(gps_week: int) -> List[str]:
     url = f"https://cddis.nasa.gov/archive/gnss/products/{gps_week}/"
     try:
         response = requests.get(url, timeout=10)
@@ -257,11 +244,9 @@ def retrieve_all_cddis_types(gps_week: int) -> list[str]:
         print(f"Failed to fetch files for GPS week {gps_week}: {e}")
         return []
     
-    # Parse the HTML links for file names
     soup = BeautifulSoup(response.text, 'html.parser')
     files = [a['href'] for a in soup.find_all('a', href=True) if not a['href'].endswith('/')]
     return files
-
 
 def create_cddis_file(filepath: Path, start: GPSDate, end: GPSDate) -> None:
     """
@@ -285,13 +270,11 @@ def create_cddis_file(filepath: Path, start: GPSDate, end: GPSDate) -> None:
                 except Exception:
                     pass  # Skip if the filename doesn't match expected format
 
-
-def gps_week_range(start: GPSDate, end: GPSDate) -> list[int]:
+def gps_week_range(start: GPSDate, end: GPSDate) -> List[int]:
     """
     Generate a list of GPS weeks between two GPSDate objects.
     """
     return list(range(int(start.gpswk), int(end.gpswk) + 1))
-
 
 if __name__ == "__main__":
     if not validate_netrc():

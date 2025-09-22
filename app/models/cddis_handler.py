@@ -117,6 +117,7 @@ def get_product_dataframe(start_time: datetime, end_time: datetime, target_files
 def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
     """
     Analyzes dataframe for the valid analysis_centers that provide continuous coverage
+
     :param data: dataframe to analyze (use get_product_dataframe to filter for time and target files)
     :returns: set of valid analysis centers
     """
