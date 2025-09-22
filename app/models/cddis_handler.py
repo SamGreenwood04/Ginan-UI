@@ -2,7 +2,6 @@ import gzip
 import shutil
 import time
 from datetime import datetime, timedelta
-from netrc import netrc
 from pathlib import Path
 
 import pandas as pd
@@ -118,9 +117,7 @@ def get_product_dataframe(start_time: datetime, end_time: datetime, target_files
 def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
     """
     Analyzes dataframe for the valid analysis_centers that provide continuous coverage
-    :param start_time: the start of the time window (use str_to_datetime helper function)
-    :param end_time: the start of the time window (use str_to_datetime helper function)
-    :param target_files: list of target files to filter for, defaulted to ["CLK","BIA","SP3"]
+    :param data: dataframe to analyze (use get_product_dataframe to filter for time and target files)
     :returns: set of valid analysis centers
     """
     for (center, _type, _format), group in data.groupby(["analysis_center", "solution_type", "format"]):
@@ -152,7 +149,7 @@ def download_products(products: pd.DataFrame, download_dir: Path = Path("./downl
     """
     Downloads all products in the provided DataFrame to the specified directory.
 
-    :param products : DataFrame containing product metadata to download
+    :param products : DataFrame (from get_product_dataframe) of all products to download
     :param download_dir: Directory to save downloaded files
     :param progress_callback: Optional callback function for progress updates (filename, percent)
     :param log_callback: Optional callback function for log messages (message)
