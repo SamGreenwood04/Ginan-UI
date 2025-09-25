@@ -1,20 +1,41 @@
 import gzip
 import shutil
-import time
+import urllib
 from datetime import datetime, timedelta
+from http.client import HTTPException
 from pathlib import Path
+from typing import Optional
 
+import unlzw3
 import pandas as pd
 import numpy as np
+from requests import HTTPError
 
 from app.utils.cddis_email import get_netrc_auth
-from app.utils.gn_functions import GPSDate
+from app.utils.common_dirs import INPUT_PRODUCTS_PATH
+from app.utils.gn_functions import GPSDate, download_url
 import requests
 from bs4 import BeautifulSoup, SoupStrainer
 
 BASE_URL = "https://cddis.nasa.gov/archive"
 GPS_ORIGIN = np.datetime64("1980-01-06 00:00:00") # Magic date from gn_functions
 MAX_RETRIES = 3
+
+METADATA = [
+    "https://files.igs.org/pub/station/general/igs_satellite_metadata.snx",
+    "https://files.igs.org/pub/station/general/igs20.atx",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/OLOAD_GO.BLQ.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/ALOAD_GO.BLQ.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/igrf14coeffs.txt.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/opoleloadcoefcmcor.txt.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/fes2014b_Cnm-Snm.dat.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/DE436.1950.2050.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/gpt_25.grd.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/bds_yaw_modes.snx.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/qzss_yaw_modes.snx.gz",
+    "https://peanpod.s3.ap-southeast-2.amazonaws.com/aux/products/tables/sat_yaw_bias_rate.snx.gz",
+    "https://datacenter.iers.org/data/latestVersion/finals.data.iau2000.txt"
+]
 
 def date_to_gpswk(date: datetime) -> int:
     return int(GPSDate(np.datetime64(date)).gpswk)
@@ -147,28 +168,93 @@ def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
 
     return centers
 
-def download_products(products: pd.DataFrame, download_dir: Path = Path("./downloads"), progress_callback=None,
-                      log_callback=None, yield_progress: bool = False,
-):
+def extract_file(filename: str, compressed: Path, decompressed: Path) -> Path:
+    if filename.endswith((".gz", ".gzip")):
+        with gzip.open(compressed, "rb") as f_in, open(decompressed, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+    elif filename.endswith(".Z"):
+        decompressed_data = unlzw3.unlzw(compressed)
+        with open(decompressed, "wb") as f_out:
+            f_out.write(decompressed_data)
+    compressed.unlink()
+    return decompressed
+
+def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_PRODUCTS_PATH,
+                  log_callback=None) -> Optional[Path]:
+    def log(msg: str):
+        log_callback(msg) if log_callback else print(msg)
+    log(f"Attempting to download: {url}")
+
+    filename = url.split("/")[-1]
+    if filename.endswith((".gz", ".gzip", ".Z")):
+        compressed = Path(download_dir / filename)
+        decompressed = Path(download_dir / ".".join(filename.split(".")[:-1]))
+    else:
+        compressed = None
+        decompressed = Path(download_dir / filename)
+
+    # 1. Ensure the file is not already downloaded
+    if decompressed.exists():
+        log(f"{decompressed} already exists, skipping download")
+        return decompressed
+
+    # 2. Try extract from a compressed version
+    if compressed and compressed.exists():
+        log(f"Found {compressed}, extracting to {decompressed}")
+        try:
+            return extract_file(filename, compressed, decompressed)
+        except Exception as e:
+            log(f"Failed to extract {filename}: {e}")
+
+    # 3. Download then extract
+    for i in range(MAX_RETRIES):
+        try:
+            if url.startswith(BASE_URL): # don't use session with creds elsewhere
+                resp = session.get(url, timeout=30)
+            else:
+                resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+
+            if compressed:
+                with open(compressed, "wb") as f_out:
+                    f_out.write(resp.content)
+                log(f"{compressed} downloaded, extracting to {decompressed}")
+                return extract_file(filename, compressed, decompressed)
+            else:
+                with open(decompressed, "wb") as f_out:
+                    f_out.write(resp.content)
+                log(f"{decompressed} downloaded.")
+                return decompressed
+        except (HTTPException, HTTPError) as e:
+            log(f"Session failed on attempt {i} to download {filename}: {e}")
+            try:
+                download_url(url, decompressed)
+            except Exception as e:
+                log(f"Failed attempt {1} to download {url}: {e}")
+                return None
+
+def download_metadata(download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None):
+    download_products(pd.DataFrame(), download_dir, log_callback, metadata=True)
+
+def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
+                      metadata=True, start_time=None, end_time=None):
     """
     Downloads all products in the provided DataFrame to the specified directory.
 
     :param products : DataFrame (from get_product_dataframe) of all products to download
     :param download_dir: Directory to save downloaded files
-    :param progress_callback: Optional callback function for progress updates (filename, percent)
     :param log_callback: Optional callback function for log messages (message)
-    :param yield_progress: If True, function acts as a generator yielding (filename, percent) tuples
+    :param metadata: Optional boolean flag to determine if products should be downloaded
+    :param start_time: NECESSARY FOR BRDC DOWNLOAD
+    :param end_time: NECESSARY FOR BRDC DOWNLOAD
     :returns: None if not in generator mode; otherwise yields (filename, percent) tuples
     """
-    download_dir.mkdir(parents=True, exist_ok=True)
-    session = requests.Session()
-    session.auth = get_netrc_auth()
+    def log(msg: str):
+        log_callback(msg) if log_callback else print(msg)
 
-    if log_callback:
-        log_callback(f"📦 Found {len(products)} files to download")
-    else:
-        print(f"📦 Found {len(products)} files to download")
-
+    # 1. Retrieve filenames from the DataFrame
+    log(f"📦 Found {len(products)} files in DataFrame")
+    downloads = []
     for _, row in products.iterrows():
         gps_week = date_to_gpswk(row.date)
         if gps_week < 2237:
@@ -178,113 +264,37 @@ def download_products(products: pd.DataFrame, download_dir: Path = Path("./downl
                 day = 7
             else:
                 day = int((row.date - gpswk_to_date(gps_week)).days)
-            filename = f"{row.analysis_center}{gps_week}{day}.{row.format}.gz"
+            filename = f"{row.analysis_center.lower()}{gps_week}{day}.{row.format.lower()}.Z"
         else:
             # e.g. GRG0OPSFIN_20232620000_01D_01D_SOL.SNX.gz
             # AAA0OPSSNX_YYYYDDDHHMM_LEN_SMP_CNT.FMT.gz
             filename = f"{row.analysis_center}0{row.project}{row.solution_type}_{row.date.strftime('%Y%j%H%M')}_{row.period.days:02d}D_{row.resolution}_{row.content}.{row.format}.gz"
 
         url = f"{BASE_URL}/gnss/products/{gps_week}/{filename}"
-        if log_callback:
-            log_callback(f"[Handler] Preparing to download: {url}")
+        downloads.append(url)
+
+    # 2. Add in metadata urls
+    if metadata:
+        for url in METADATA:
+            downloads.append(url)
+        if start_time and end_time:
+            reference_dt = start_time - timedelta(days=1)
+            while (end_time - reference_dt).total_seconds() > 0:
+                day = reference_dt.strftime("%j")
+                filename = f"BRDC00IGS_R_{reference_dt.year}{day}0000_01D_MN.rnx.gz"
+                url = f"{BASE_URL}/gnss/data/daily/{reference_dt.year}/brdc/{filename}"
+                downloads.append(url)
+                reference_dt += timedelta(days=1)
+
+    download_dir.mkdir(parents=True, exist_ok=True)
+    (download_dir / "tables").mkdir(parents=True, exist_ok=True)
+    sesh = requests.Session()
+    sesh.auth = get_netrc_auth()
+    for url in downloads:
+        x = url.split("/")
+        if len(x) < 2:
+            fin_dir = download_dir
         else:
-            print(f"[Handler] Preparing to download: {url}")
+            fin_dir = download_dir / "tables" if x[-2]=="tables" else download_dir
 
-        final_file = download_dir / filename
-        partial_file = final_file.with_suffix(final_file.suffix + ".part")
-        decompressed_path = final_file.with_suffix('') if final_file.suffix == ".gz" else final_file
-
-        # Already exists?
-        if decompressed_path.exists():
-            msg = f"✅ Skipping (already exists): {decompressed_path.name}"
-            log_callback(msg) if log_callback else print(msg)
-            continue
-
-        # Existing .gz but not decompressed
-        if final_file.exists() and final_file.suffix == ".gz":
-            try:
-                with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-                final_file.unlink()
-                msg = f"🗜️ Decompressed existing: {decompressed_path.name}"
-                log_callback(msg) if log_callback else print(msg)
-                continue
-            except Exception as e:
-                msg = f"❌ Failed to decompress existing {final_file.name}: {e}"
-                log_callback(msg) if log_callback else print(msg)
-
-        # --- Retry & resume loop ---
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                headers = {}
-                mode = "wb"
-                existing_size = 0
-
-                if partial_file.exists():
-                    existing_size = partial_file.stat().st_size
-                    if existing_size > 0:
-                        headers = {"Range": f"bytes={existing_size}-"}
-                        mode = "ab"
-                        msg = f"↪️ Resuming {filename} from byte {existing_size}"
-                        log_callback(msg) if log_callback else print(msg)
-
-                msg = f"⬇️ Downloading: {filename} (attempt {attempt}/{MAX_RETRIES})"
-                log_callback(msg) if log_callback else print(msg)
-
-                response = session.get(url, headers=headers, stream=True, timeout=30)
-                with response as r:
-                    if r.status_code == 416:  # Range beyond EOF → treat as complete
-                        msg = f"⚠️ Server says {filename} already complete."
-                        log_callback(msg) if log_callback else print(msg)
-                        break
-                    r.raise_for_status()
-
-                    total_size = int(r.headers.get("Content-Length", 0)) + existing_size
-                    downloaded = existing_size
-
-                    with open(partial_file, mode) as f:
-                        for chunk in r.iter_content(512 * 512):
-                            if chunk:
-                                f.write(chunk)
-                                downloaded += len(chunk)
-
-                                percent = int(downloaded * 100 / total_size) if total_size > 0 else 100
-                                if progress_callback:
-                                    progress_callback(filename, percent)
-                                if yield_progress:
-                                    yield filename, percent
-
-                # Rename partial → final
-                partial_file.rename(final_file)
-
-                # Decompress if needed
-                if final_file.suffix == ".gz":
-                    with gzip.open(final_file, 'rb') as f_in, open(decompressed_path, 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
-                    final_file.unlink()
-                    msg = f"🗜️ Decompressed to: {decompressed_path.name}"
-                    log_callback(msg) if log_callback else print(msg)
-
-                # ✅ per-file completion log
-                msg = f"✅ Finished downloading {decompressed_path.name}"
-                log_callback(msg) if log_callback else print(msg)
-
-                break  # success, exit retry loop
-
-            except Exception as e:
-                if attempt == MAX_RETRIES:
-                    msg = f"❌ Failed to download {filename} after {MAX_RETRIES} attempts: {e}"
-                    log_callback(msg) if log_callback else print(msg)
-                    if partial_file.exists():
-                        partial_file.unlink()
-                else:
-                    wait = 5 * attempt
-                    msg = f"⚠️ Download failed ({e}), retrying in {wait}s..."
-                    log_callback(msg) if log_callback else print(msg)
-                    time.sleep(wait)
-                    continue  # retry same file
-
-    # In generator mode, function is already exhausted by the caller
-    if not yield_progress:
-        return None
-
+        download_file(url, sesh, fin_dir, log_callback)

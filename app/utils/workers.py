@@ -95,7 +95,7 @@ class PPPDownloadWorker(QObject):
         try:
             # --- Force consumption of generator if returned ---
             result = download_products(self.products, download_dir=self.download_dir,
-                                       progress_callback=lambda fn, p: self.progress.emit(fn, p))
+                                       start_time=self.start_epoch, end_time=self.end_epoch)
 
             # If a generator was returned, exhaust it
             if result is not None:
