@@ -530,7 +530,7 @@ class InputController(QObject):
         form = QFormLayout(dlg)
         
         class DecimalSpinBox(QDoubleSpinBox):
-            def __init__(self, parent=None, top=1e100, bottom=-1e100, precision = 15,step_size = 0.1):
+            def __init__(self, parent=None, top=10000, bottom=-10000, precision = 15,step_size = 0.1):
                 super().__init__(parent)
                 self.setRange(bottom, top)
                 
