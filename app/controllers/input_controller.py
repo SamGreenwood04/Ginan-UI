@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List
+from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 
@@ -595,23 +596,41 @@ class InputController(QObject):
         try:
             e0, n0, u0 = [float(x.strip()) for x in self.ui.antennaOffsetValue.text().split(",")]
         except Exception:
-            e0 = n0 = u0 = 0.0
+            e0 = n0 = u0 = 0.0 
 
         form = QFormLayout(dlg)
+        
+        class DecimalSpinBox(QDoubleSpinBox):
+            def __init__(self, parent=None, top=10000, bottom=-10000, precision = 15,step_size = 0.1):
+                super().__init__(parent)
+                self.setRange(bottom, top)
+                
+                self.setDecimals(precision)  # fallback precision
+                # up down arrow Step size
+                # note there is some float point inaccuracy when useing steps
+                self.setSingleStep(step_size)
 
-        sb_e = QDoubleSpinBox(dlg)
-        sb_e.setRange(-9999, 9999)
-        sb_e.setDecimals(3)
+            def textFromValue(self, value: float) -> str:
+                """Format value dynamically with Decimal for more precision"""
+                # Convert through Decimal to avoid scientific notation
+                d = Decimal(str(value))
+                return str(d.normalize())  # trims trailing zeros
+
+            def valueFromText(self, text: str) -> float:
+                """Parse text back into a float"""
+                try:
+                    return float(Decimal(text))
+                except InvalidOperation:
+                    raise ValueError(f"Failed to convert Antenna offset to float: {text}")
+       
+       
+        sb_e = DecimalSpinBox(dlg)
         sb_e.setValue(e0)
-
-        sb_n = QDoubleSpinBox(dlg)
-        sb_n.setRange(-9999, 9999)
-        sb_n.setDecimals(3)
+        
+        sb_n = DecimalSpinBox(dlg)
         sb_n.setValue(n0)
-
-        sb_u = QDoubleSpinBox(dlg)
-        sb_u.setRange(-9999, 9999)
-        sb_u.setDecimals(3)
+            
+        sb_u = DecimalSpinBox(dlg)
         sb_u.setValue(u0)
 
         form.addRow("E:", sb_e)
