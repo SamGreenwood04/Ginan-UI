@@ -119,6 +119,134 @@ class InputController(QObject):
         # CDDIS credentials dialog
         self.ui.cddisCredentialsButton.clicked.connect(self._open_cddis_credentials_dialog)
 
+        self.setup_tooltips()
+
+    def setup_tooltips(self):
+        """Add helpful tooltips to UI elements"""
+
+        # Consistent tooltip style for all elements
+        tooltip_style = """
+                QToolTip {
+                    background-color: #ffffcc;
+                    color: #000000;
+                    border: 1px solid #999999;
+                    padding: 4px;
+                    border-radius: 3px;
+                    font-size: 11px;
+                }
+                """
+
+        # Apply to parent window
+        self.parent.setStyleSheet(self.parent.styleSheet() + tooltip_style)
+
+        # Add tooltip styling to buttons without changing their appearance
+        # Just append the tooltip style to their existing styles
+
+        # Get current styles and append tooltip styling
+        obs_style = self.ui.observationsButton.styleSheet() + tooltip_style
+        out_style = self.ui.outputButton.styleSheet() + tooltip_style
+        proc_style = self.ui.processButton.styleSheet() + tooltip_style
+        cddis_style = self.ui.cddisCredentialsButton.styleSheet() + tooltip_style
+
+        self.ui.observationsButton.setStyleSheet(obs_style)
+        self.ui.outputButton.setStyleSheet(out_style)
+        self.ui.processButton.setStyleSheet(proc_style)
+        self.ui.cddisCredentialsButton.setStyleSheet(cddis_style)
+
+        # File selection buttons
+        self.ui.observationsButton.setToolTip(
+            "Select a RINEX observation file (.rnx or .rnx.gz)\n"
+            "This will automatically extract metadata and populate the form fields"
+        )
+
+        self.ui.outputButton.setToolTip(
+            "Choose the directory where processing results will be saved\n"
+            "A subdirectory will be created for this processing session"
+        )
+
+        self.ui.processButton.setToolTip(
+            "Start the PPP processing using the configured parameters\n"
+            "Ensure all required fields are filled before processing"
+        )
+
+        # Configuration buttons
+        self.ui.showConfigButton.setToolTip(
+            "Generate and open the YAML configuration file\n"
+            "You can review and modify advanced settings before processing"
+        )
+
+        self.ui.cddisCredentialsButton.setToolTip(
+            "Set your NASA Earthdata credentials for downloading PPP products\n"
+            "Required for accessing the CDDIS archive data"
+        )
+
+        # Input fields and combos
+        self.ui.Mode.setToolTip(
+            "Processing mode:\n"
+            "• Static: For stationary receivers\n"
+            "• Kinematic: For moving receivers\n"
+            "• Dynamic: For high-dynamic applications"
+        )
+
+        self.ui.Constellations_2.setToolTip(
+            "Select which GNSS constellations to use:\n"
+            "GPS, Galileo (GAL), GLONASS (GLO), BeiDou (BDS), QZSS (QZS)\n"
+            "More constellations generally improve accuracy"
+        )
+
+        self.ui.PPP_provider.setToolTip(
+            "Analysis centre that provides PPP products\n"
+            "Options populated based on your observation time window"
+        )
+
+        self.ui.PPP_project.setToolTip(
+            "PPP product project type\n"
+            "Different projects offer varying latency and accuracy"
+        )
+
+        self.ui.PPP_series.setToolTip(
+            "PPP product series:\n"
+            "• RAP: Rapid (lower latency)\n"
+            "• ULT: Ultra-rapid\n"
+            "• FIN: Final (highest accuracy)"
+        )
+
+        # Receiver/Antenna fields
+        self.ui.Receiver_type.setToolTip(
+            "Receiver model extracted from RINEX header\n"
+            "Click to manually edit if needed"
+        )
+
+        self.ui.Antenna_type.setToolTip(
+            "Antenna model extracted from RINEX header\n"
+            "Must match entries in the ANTEX (.atx) calibration file\n"
+            "Click to manually edit if needed"
+        )
+
+        # Time and offset buttons
+        self.ui.timeWindowButton.setToolTip(
+            "Observation time window extracted from RINEX file\n"
+            "Click to adjust start and end times for processing"
+        )
+
+        self.ui.dataIntervalButton.setToolTip(
+            "Data sampling interval in seconds\n"
+            "Click to change the processing interval"
+        )
+
+        self.ui.antennaOffsetButton.setToolTip(
+            "Antenna reference point offset in metres (East, North, Up)\n"
+            "Typically extracted from RINEX header\n"
+            "Click to modify if needed"
+        )
+
+        # Value display labels
+        self.ui.receiverTypeValue.setToolTip("Receiver type from RINEX header")
+        self.ui.antennaTypeValue.setToolTip("Antenna type from RINEX header")
+        self.ui.constellationsValue.setToolTip("Available constellations in RINEX data")
+        self.ui.timeWindowValue.setToolTip("Observation time span")
+        self.ui.dataIntervalValue.setToolTip("Data sampling interval")
+        self.ui.antennaOffsetValue.setToolTip("Antenna offset: East, North, Up (metres)")
 
     def _open_cddis_credentials_dialog(self):
         """ Open the CDDIS Credential Input Dialog Box """
@@ -972,7 +1100,7 @@ class InputController(QObject):
 
     @staticmethod
     def _get_ppp_series_items() -> List[str]:
-        return ["RAP", "ULT", "FIN"]
+        return ["ULT", "RAP", "FIN"]
 
     #endregion
 
