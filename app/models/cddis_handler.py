@@ -13,13 +13,14 @@ import requests
 from bs4 import BeautifulSoup, SoupStrainer
 
 BASE_URL = "https://cddis.nasa.gov/archive"
+GPS_ORIGIN = np.datetime64("1980-01-06 00:00:00") # Magic date from gn_functions
 MAX_RETRIES = 3
 
 def date_to_gpswk(date: datetime) -> int:
     return int(GPSDate(np.datetime64(date)).gpswk)
 
-def gpswk_to_date(gps_week: int) -> datetime:
-    return GPSDate(gps_week).as_datetime
+def gpswk_to_date(gps_week: int, gps_day: int=0) -> datetime:
+    return GPSDate(GPS_ORIGIN + np.timedelta64(gps_week, "W") + np.timedelta64(gps_day, "D")).as_datetime
 
 def str_to_datetime(date_time_str):
     """
@@ -42,6 +43,8 @@ def get_product_dataframe(start_time: datetime, end_time: datetime, target_files
     """
     if target_files is None:
         target_files = ["CLK", "BIA", "SP3"]
+    else:
+        target_files = [file.upper() for file in target_files]
 
     products = pd.DataFrame(columns=["analysis_center", "project", "date", "solution_type", "period", "resolution", "content", "format"])
 
@@ -65,11 +68,11 @@ def get_product_dataframe(start_time: datetime, end_time: datetime, target_files
                 if gps_week < 2237:
                     # Format convention changed in week 2237
                     # AAAWWWWD.TYP.Z
-                    center = filename[0:3] # e.g. "COD"
+                    center = filename[0:3].upper() # e.g. "COD"
                     _type = "FIN"  # pre-2237 were probably always final solutions :shrug:
                     day = int(filename[7])  # e.g. "0", 0-indexed, 7 indicates weekly
-                    _format = filename[9:12] # e.g. "snx", "ssc", "sum", "erp"
-                    project = None
+                    _format = filename[9:12].upper() # e.g. "snx", "ssc", "sum", "erp"
+                    project = "OPS"
                     sampling_resolution = None
                     content = None
                     date = gpswk_to_date(gps_week)
