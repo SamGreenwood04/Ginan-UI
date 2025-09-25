@@ -550,7 +550,7 @@ class InputController(QObject):
                 try:
                     return float(Decimal(text))
                 except InvalidOperation:
-                    return 0.0
+                    raise ValueError(f"Failed to convert Antenna offset to float: {text}")
        
        
         sb_e = DecimalSpinBox(dlg)
