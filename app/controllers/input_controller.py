@@ -120,6 +120,7 @@ class InputController(QObject):
         self.ui.cddisCredentialsButton.clicked.connect(self._open_cddis_credentials_dialog)
 
 
+
     def _open_cddis_credentials_dialog(self):
         """ Open the CDDIS Credential Input Dialog Box """
         dialog = CredentialsDialog(self.parent)
@@ -147,6 +148,9 @@ class InputController(QObject):
         try:
             extractor = RinexExtractor(self.rnx_file)
             result = extractor.extract_rinex_data(self.rnx_file)
+
+            # Verify antenna_type against .atx file
+            self.verify_antenna_type(result)
 
             self.ui.terminalTextEdit.append("🔍 Scanning CDDIS archive for PPP products. Please wait...")
 
@@ -208,6 +212,73 @@ class InputController(QObject):
             self.ready.emit(str(self.rnx_file), str(self.output_dir))
 
         return result
+
+    def verify_antenna_type(self, result: List[str]):
+        # Verify antenna_type is present within the .atx file
+        # Return warning if not
+        atx_path = self.get_best_atx_path()
+
+        with open(atx_path, "r") as file:
+            for line in file:
+                label = line[60:].strip()
+
+                # Read and find antenna_type tag
+                if label == "TYPE / SERIAL NO" and line[20:24].strip() == "":
+                    valid_antenna_type = line[0:20]
+
+                    if len(valid_antenna_type.strip()) < 16 or not valid_antenna_type[16:].strip():
+                        # Just the antenna part is included, need to add radome (cover)
+                        antenna_part = valid_antenna_type[:15].strip()
+                        valid_antenna_type = f"{antenna_part:<15} NONE"
+
+                    # Do same normalisation for result["antenna_type"]
+                    result_antenna = result["antenna_type"]
+
+                    if len(result_antenna.strip()) < 16 or (
+                            len(result_antenna) > 16 and not result_antenna[16:].strip()):
+                        antenna_part = result_antenna[:15].strip()
+                        result_antenna = f"{antenna_part:<15} NONE"
+
+                    # Compare strings
+                    if result_antenna.strip() == valid_antenna_type.strip():
+                        self.ui.terminalTextEdit.append("✅ Antenna type verified from .atx file")
+                        return
+
+        # Not found! Return warning to user
+        print(f"DEBUG: No matching antenna type found in .atx file")
+        QMessageBox.warning(
+            None,
+            "Provided Antenna Type Invalid",
+            f'Provided antenna type in .rnx file: "{result["antenna_type"]}"\n'
+            f'not found in .atx file: "{atx_path}"'
+        )
+        self.ui.terminalTextEdit.append(f"⚠️ Antenna type failed to verify from .atx file: {atx_path}")
+        return
+
+    def get_best_atx_path(self):
+        # Find all .atx files present and prioritise the newest ones
+        # Return filepath string to best .atx file
+        atx_files = list(INPUT_PRODUCTS_PATH.glob("*.atx"))
+        if len(atx_files) == 0:
+            raise FileNotFoundError("No .atx file found")
+        elif len(atx_files) > 1:
+            # Priority order: igs20 > igs14 > igs13 > igs08 > igs05 > any other .atx file
+            priority_order = ['igs20.atx', 'igs14.atx', 'igs13.atx', 'igs08.atx', 'igs05.atx']
+            atx_path = None
+            for best_atx in priority_order:
+                matching_files = [f for f in atx_files if f.name == best_atx]
+                if matching_files:
+                    atx_path = matching_files[0]
+                    self.ui.terminalTextEdit.append(f"📁 Selected .atx file: {atx_path.name} based on priority")
+                    break
+
+            # If none of the preferred files found, use the first available
+            if atx_path is None:
+                atx_path = atx_files[0]
+                self.ui.terminalTextEdit.append(f"📁 Selected .atx file: {atx_path.name} based on fallback")
+        else:
+            atx_path = atx_files[0]
+        return atx_path
 
     def _update_constellations_multiselect(self, constellation_str: str):
         """
