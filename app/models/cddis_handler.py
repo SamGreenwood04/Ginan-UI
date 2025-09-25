@@ -1,6 +1,5 @@
 import gzip
 import shutil
-import urllib
 from datetime import datetime, timedelta
 from http.client import HTTPException
 from pathlib import Path
