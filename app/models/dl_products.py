@@ -55,9 +55,10 @@ def str_to_datetime(date_time_str):
 
 def get_product_dataframe(start_time: datetime, end_time: datetime, target_files=None) -> pd.DataFrame:
     """
-    Retrieves a DataFrame of available products for given time window and target files
-    :param start_time: the start of the time window (use str_to_datetime helper function)
-    :param end_time: the start of the time window (use str_to_datetime helper function)
+    Retrieves a DataFrame of available products for given time window and target files. Filter the DataFrame then use
+    download_products to download the files.
+    :param start_time: the start of the time window (start_epoch)
+    :param end_time: the start of the time window (end_epoch)
     :param target_files: list of target files to filter for, defaulted to ["CLK","BIA","SP3"]
     :returns: set of valid analysis centers
     """
@@ -131,21 +132,21 @@ def get_product_dataframe(start_time: datetime, end_time: datetime, target_files
                         "content": content,
                         "format": _format
                     }
-            except (ValueError, IndexError) as e:
-                print(f"Skipping irrelevant file: {filename} ({e})")
+            except (ValueError, IndexError):
+                # Skips md5 sums and other non-conforming files
                 continue
     products = products.drop_duplicates(inplace=False) # resets indexes too
     return products
 
 def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
     """
-    Analyzes dataframe for the valid analysis_centers that provide continuous coverage
+    Analyzes dataframe for valid analysis centers (those that provide contiguous coverage)
 
     :param data: dataframe to analyze (use get_product_dataframe to filter for time and target files)
     :returns: set of valid analysis centers
     """
     for (center, _type, _format), group in data.groupby(["analysis_center", "solution_type", "format"]):
-        # We only included files within the time window, now just check they're contiguous
+        # Time window is filtered for in get_product_dataframe; only need to check they're contiguous
         group = group.sort_values("date").reset_index(drop=True)
         for i in range(len(group)-1):
             if group.loc[i]["date"] + group.loc[i]["period"] < group.loc[i+1]["date"]:
@@ -182,7 +183,6 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
                   log_callback=None) -> Optional[Path]:
     def log(msg: str):
         log_callback(msg) if log_callback else print(msg)
-    log(f"Attempting to download: {url}")
 
     filename = url.split("/")[-1]
     if filename.endswith((".gz", ".gzip", ".Z")):
@@ -208,12 +208,14 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
     # 3. Download then extract
     for i in range(MAX_RETRIES):
         try:
-            if url.startswith(BASE_URL): # don't use session with creds elsewhere
+            # Download with session or request based on URL
+            if url.startswith(BASE_URL):
                 resp = session.get(url, timeout=30)
             else:
                 resp = requests.get(url, timeout=30)
             resp.raise_for_status()
 
+            # Try extracting compressed files
             if compressed:
                 with open(compressed, "wb") as f_out:
                     f_out.write(resp.content)
@@ -225,27 +227,52 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
                 log(f"{decompressed} downloaded.")
                 return decompressed
         except (HTTPException, HTTPError) as e:
-            log(f"Session failed on attempt {i} to download {filename}: {e}")
-            try:
-                download_url(url, decompressed)
-            except Exception as e:
-                log(f"Failed attempt {1} to download {url}: {e}")
-                return None
+            log(f"Failed attempt {i} to download {filename}: {e}")
+    return None
 
-def download_metadata(download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None):
-    download_products(pd.DataFrame(), download_dir, log_callback, metadata=True)
+def get_brdc_urls(start_time: datetime, end_time: datetime) -> list[str]:
+    """
+    Generates a list of BRDC file URLs for the specified date range.
+
+    :param start_time: Start of the date range
+    :param end_time: End of the date range
+    :returns: List of BRDC file URLs
+    """
+    urls = []
+    reference_dt = start_time - timedelta(days=1)
+    while (end_time - reference_dt).total_seconds() > 0:
+        day = reference_dt.strftime("%j")
+        filename = f"BRDC00IGS_R_{reference_dt.year}{day}0000_01D_MN.rnx.gz"
+        url = f"{BASE_URL}/gnss/data/daily/{reference_dt.year}/brdc/{filename}"
+        urls.append(url)
+        reference_dt += timedelta(days=1)
+    return urls
+
+def download_metadata(download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
+                      start_time: datetime=None, end_time: datetime=None):
+    """
+    download_products wrapper with defaults for downloading standard metadata files. If start_time and end_time are
+    provided, BRDC files for the date range will also be downloaded.
+
+    :param download_dir: Directory to save downloaded files
+    :param log_callback: Optional callback function for log messages (message)
+    :param start_time: REQUIRED for BRDC file downloads
+    :param end_time: REQUIRED end time for BRDC file downloads
+    """
+    if start_time and end_time:
+        download_products(pd.DataFrame(), download_dir, log_callback, dl_urls=METADATA.extend(get_brdc_urls(start_time, end_time)))
+    else:
+        download_products(pd.DataFrame(), download_dir, log_callback, dl_urls=METADATA)
 
 def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
-                      metadata=True, start_time=None, end_time=None):
+                      dl_urls: list=None):
     """
     Downloads all products in the provided DataFrame to the specified directory.
 
     :param products : DataFrame (from get_product_dataframe) of all products to download
     :param download_dir: Directory to save downloaded files
     :param log_callback: Optional callback function for log messages (message)
-    :param metadata: Optional boolean flag to determine if products should be downloaded
-    :param start_time: NECESSARY FOR BRDC DOWNLOAD
-    :param end_time: NECESSARY FOR BRDC DOWNLOAD
+    :param dl_urls: Optional list of additional URLs to download (e.g. BRDC files)
     :returns: None if not in generator mode; otherwise yields (filename, percent) tuples
     """
     def log(msg: str):
@@ -272,18 +299,8 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
         url = f"{BASE_URL}/gnss/products/{gps_week}/{filename}"
         downloads.append(url)
 
-    # 2. Add in metadata urls
-    if metadata:
-        for url in METADATA:
-            downloads.append(url)
-        if start_time and end_time:
-            reference_dt = start_time - timedelta(days=1)
-            while (end_time - reference_dt).total_seconds() > 0:
-                day = reference_dt.strftime("%j")
-                filename = f"BRDC00IGS_R_{reference_dt.year}{day}0000_01D_MN.rnx.gz"
-                url = f"{BASE_URL}/gnss/data/daily/{reference_dt.year}/brdc/{filename}"
-                downloads.append(url)
-                reference_dt += timedelta(days=1)
+    if dl_urls:
+        downloads.extend(dl_urls)
 
     download_dir.mkdir(parents=True, exist_ok=True)
     (download_dir / "tables").mkdir(parents=True, exist_ok=True)

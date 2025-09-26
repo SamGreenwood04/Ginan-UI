@@ -12,8 +12,8 @@ from decimal import Decimal, InvalidOperation
 
 import pandas as pd
 
-from app.models.cddis_handler import get_valid_analysis_centers, str_to_datetime
-from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QRunnable, Slot, QThreadPool
+from app.models.dl_products import get_valid_analysis_centers, str_to_datetime
+from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QRunnable, Slot, QThreadPool, QThread
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -37,7 +37,8 @@ from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
 from app.utils.archive_manager import (archive_products_if_rinex_changed, archive_products_if_selection_changed)
 from app.utils.archive_manager import archive_old_outputs
-from app.utils.workers import CDDISWorker
+from app.utils.workers import PPPWorker
+
 
 class InputController(QObject):
     """
@@ -65,8 +66,8 @@ class InputController(QObject):
         self.parent = parent_window
         self.execution = execution
 
-        self.rnx_file: str = ""
-        self.output_dir: str = ""
+        self.rnx_file: Path=None
+        self.output_dir: Path=None
         self.products_df: pd.DataFrame = pd.DataFrame() # CDDIS replaces with a populated dataframe
 
         # Config file path
@@ -155,20 +156,20 @@ class InputController(QObject):
 
             self.ui.terminalTextEdit.append("🔍 Scanning CDDIS archive for PPP products. Please wait...")
 
-            # Synchronous CDDIS Products list downloader (for testing only)
-            #try:
-            #    self.ui.terminalTextEdit.append("⚠️ Running synchronous CDDIS test...")
-            #    self.cddis_handler = CDDIS_Handler(result['start_epoch'], result['end_epoch'])
-            #    self.valid_analysis_centers = self.cddis_handler.get_list_of_valid_analysis_centers()
-            #    print("[SYNC TEST] Centers:", self.valid_analysis_centers)
-            #except Exception as e:
-            #    print("[SYNC TEST ERROR]", e)
-
             # Kick off CDDIS PPP products query in background thread
-            worker = CDDISWorker(str_to_datetime(result['start_epoch']), str_to_datetime(result['end_epoch']))
-            worker.signals.finished.connect(self._on_cddis_ready)
-            worker.signals.error.connect(self._on_cddis_error)
-            QThreadPool.globalInstance().start(worker)
+            start_epoch = str_to_datetime(result['start_epoch'])
+            end_epoch = str_to_datetime(result['end_epoch'])
+            self.worker = PPPWorker(start_epoch=start_epoch, end_epoch=end_epoch)
+            self.metadata_thread = QThread()
+            self.worker.moveToThread(self.metadata_thread)
+
+            self.worker.finished.connect(self._on_cddis_ready)
+            self.worker.finished.connect(self.worker.deleteLater)
+            self.worker.finished.connect(self.metadata_thread.quit)
+            self.worker.error.connect(self._on_cddis_error)
+            self.metadata_thread.finished.connect(self.metadata_thread.deleteLater)
+            self.metadata_thread.started.connect(self.worker.run)
+            self.metadata_thread.start()
 
             # Populate extracted metadata immediately
             self.ui.constellationsValue.setText(result["constellations"])
@@ -830,7 +831,7 @@ class InputController(QObject):
             ppp_series=ppp_series,
             ppp_project=ppp_project,
             rnx_path=rnx_path,
-            output_path=self.output_dir,
+            output_path=str(self.output_dir),
         )
 
     def on_show_config(self):

@@ -1,17 +1,21 @@
 import os
+import threading
 from pathlib import Path
+from typing import Optional
+
 from PySide6.QtCore import QUrl, Signal, QObject, QThread, Slot, Qt
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QTextCursor
+
+from app.models.dl_products import download_metadata
 from app.utils.cddis_credentials import validate_netrc as gui_validate_netrc
 from app.models.execution import Execution
 from app.utils.ui_compilation import compile_ui
 from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
 from app.utils.cddis_email import get_username_from_netrc, write_email, test_cddis_connection
-from app.utils.download_products_https import start_metadata_download_thread, download_pea_auxiliary_products
-from app.utils.workers import PeaExecutionWorker, PPPDownloadWorker
+from app.utils.workers import PeaExecutionWorker, PPPWorker
 from app.utils.archive_manager import archive_products_if_selection_changed
 from app.models.execution import INPUT_PRODUCTS_PATH
 
@@ -59,8 +63,8 @@ class MainWindow(QMainWindow):
         self.inputCtrl.pea_ready.connect(self._on_process_clicked)
 
         # State
-        self.rnx_file: str | None = None
-        self.output_dir: str | None = None
+        self.rnx_file: Optional[str] = None
+        self.output_dir: Optional[str] = None
         self.download_progress: dict[str, int] = {}  # track per-file progress
         self.is_processing = False
 
@@ -77,7 +81,8 @@ class MainWindow(QMainWindow):
         self._validate_cddis_credentials_once()
 
         # Start validation and metadata download in a separate thread
-        start_metadata_download_thread(self.log_message)
+        thread = threading.Thread(target=download_metadata, daemon=True)
+        thread.start()
 
     def log_message(self, msg: str):
         """Append a log line normally """
@@ -145,13 +150,7 @@ class MainWindow(QMainWindow):
 
         # Start download in background
         self.download_thread = QThread()
-        self.download_worker = PPPDownloadWorker(
-            products=products,
-            download_dir=INPUT_PRODUCTS_PATH,
-            execution=self.execution,
-            start_epoch=self.inputCtrl.start_time,
-            end_epoch=self.inputCtrl.end_time,
-        )
+        self.download_worker = PPPWorker(products=products, start_epoch=self.inputCtrl.start_time, end_epoch=self.inputCtrl.end_time,)
         self.download_worker.moveToThread(self.download_thread)
 
         # Signals
@@ -177,23 +176,23 @@ class MainWindow(QMainWindow):
         # Build progress summary
         lines = []
         for f, p in self.download_progress.items():
-            bar_len = 20
-            filled = int(bar_len * p / 100)
-            bar = "█" * filled + "-" * (bar_len - filled)
+            total_length = 20
+            filled_length = int(p/100 * total_length)
+            bar = "█" * filled_length + " " * (filled_length - total_length)
             lines.append(f"{f:30} [{bar}] {p:3d}%")
         text = "\n".join(lines)
 
         # Work with cursor & doc
         cursor = self.ui.terminalTextEdit.textCursor()
         doc = self.ui.terminalTextEdit.document()
-        cursor.movePosition(QTextCursor.End)
+        cursor.movePosition(QTextCursor.MoveOperation.End)
 
         # Progress block = last N lines, where N = number of tracked files
         block = doc.findBlockByNumber(doc.blockCount() - len(self.download_progress))
         if block.isValid():
             # Replace old progress block
             cursor.setPosition(block.position())
-            cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+            cursor.movePosition(QTextCursor.MoveOperation.End)
             cursor.removeSelectedText()
             cursor.insertText(text)
         else:
@@ -202,12 +201,9 @@ class MainWindow(QMainWindow):
 
         self.ui.terminalTextEdit.setTextCursor(cursor)
 
-    def _on_download_finished(self, success, message):
+    def _on_download_finished(self, message):
         self.log_message(message)
-        if success:
-            self._start_pea_execution()
-        else:
-            self._set_processing_state(False)
+        self._start_pea_execution()
 
     def _on_download_error(self, msg):
         self.log_message(f"⚠️ PPP download error: {msg}")

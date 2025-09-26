@@ -2,58 +2,45 @@
 
 import traceback
 from datetime import datetime
+from pathlib import Path
+
 import pandas as pd
 from PySide6.QtCore import QObject, Signal, Slot, QRunnable
-from app.models.cddis_handler import get_product_dataframe, download_products
-from app.utils.download_products_https import download_pea_auxiliary_products
+from app.models.dl_products import get_product_dataframe, download_products, get_brdc_urls, download_metadata
+from app.utils.common_dirs import INPUT_PRODUCTS_PATH
 
-
-# ==========================================================
-# CDDIS Worker
-# ==========================================================
-class CDDISWorkerSignals(QObject):
+class DownloadMetadataWorker(QObject):
     """
-    Signals for CDDISWorker:
-      - finished: emits (handler, result)
-      - error: emits error message as str
+    Downloads metadata that doesn't require a specific date range.
     """
-    finished = Signal(set)  # (handler, result)
+    finished = Signal(object)
     error = Signal(str)
+    log = Signal(str)
 
-
-class CDDISWorker(QRunnable):
-    """
-    Runs a CDDIS_Handler in a background thread.
-    Used to fetch available PPP product providers without blocking the UI.
-    """
-    def __init__(self, start_epoch: datetime, end_epoch: datetime):
+    def __init__(self):
         super().__init__()
-        self.start_epoch = start_epoch
-        self.end_epoch = end_epoch
-        self.signals = CDDISWorkerSignals()
 
     @Slot()
     def run(self):
         try:
-            print(f"[CDDISWorker] Running handler from {self.start_epoch} to {self.end_epoch}")
-            data = get_product_dataframe(self.start_epoch, self.end_epoch)
-            print(f"[CDDISWorker] Finished fetching data")
-            self.signals.finished.emit(data)
+            self.log.emit("[DownloadMetadataWorker] Starting metadata download...")
+            download_metadata(log_callback=self.log.emit)
+            self.finished.emit("[DownloadMetadataWorker] Metadata downloaded.")
         except Exception:
             tb = traceback.format_exc()
-            print(f"[CDDISWorker] Exception:\n{tb}")
-            self.signals.error.emit(tb)
+            self.log.emit(f"[CDDISWorker] Exception:\n{tb}")
+            self.error.emit(tb)
 
-# ==========================================================
-# PEA execution Worker 
-# ==========================================================
+
 class PeaExecutionWorker(QObject):
     """
-    Runs execution.execute_config() in a background thread.
-    Ensures GUI remains responsive while PEA is running.
+    Executes execute_config() method of a given PEAExecution instance.
+
+    :param execution: An instance of PEAExecution.
     """
-    finished = Signal()
+    finished = Signal(object)
     error = Signal(str)
+    log = Signal(str)
 
     def __init__(self, execution):
         super().__init__()
@@ -62,55 +49,70 @@ class PeaExecutionWorker(QObject):
     @Slot()
     def run(self):
         try:
-            print("[PeaExecutionWorker] Starting PEA execution...")
+            self.log.emit("[PeaExecutionWorker] Starting PEA execution...")
             self.execution.execute_config()
-            print("[PeaExecutionWorker] Execution finished successfully.")
-            self.finished.emit()
-        except Exception as e:
+            self.finished.emit("[PeaExecutionWorker] Execution finished successfully.")
+        except Exception:
             tb = traceback.format_exc()
-            print(f"[PeaExecutionWorker] Exception:\n{tb}")
-            self.error.emit(str(e))
+            self.error.emit(f"[PeaExecutionWorker] Exception:\n{tb}")
 
-# ==========================================================
-# PPP Download Worker (PPP + Aux products)
-# ==========================================================
-class PPPDownloadWorker(QObject):
-    finished = Signal(bool, str)      # success, message
+class PPPWorker(QObject):
+    """
+    Downloads PPP and BRDC products for a specified date range or retrieves valid analysis centers.
+
+    LEAVE PRODUCTS EMPTY TO RETURN VALID ANALYSIS CENTERS.
+
+    :param products: DataFrame of products to download. (See get_product_dataframe())
+    :param download_dir: Directory to save downloaded products.
+    :param start_epoch: Start datetime for BRDC files.
+    :param end_epoch: End datetime for BRDC files.
+    """
+    finished = Signal(object)
     error = Signal(str)
-    progress = Signal(str, int)       # filename, percent
-    log = Signal(str)                 # signal for log messages
+    progress = Signal(int)
+    log = Signal(str)
 
-    def __init__(self, products: pd.DataFrame, download_dir, execution, start_epoch, end_epoch):
+    def __init__(self, start_epoch: datetime, end_epoch: datetime, download_dir: Path=INPUT_PRODUCTS_PATH,
+                 products: pd.DataFrame=pd.DataFrame()):
         super().__init__()
         self.products = products
         self.download_dir = download_dir
-        self.execution = execution
         self.start_epoch = start_epoch
         self.end_epoch = end_epoch
 
     @Slot()
     def run(self):
-        self.log.emit("🔍 PPPDownloadWorker: entering run()")
-        self.log.emit(f"Downloading {self.products.to_string()}")
+        if self.products.empty:
+            self.log.emit("[PPPDownloadWorker] No products specified, returning valid analysis centers...")
+            try:
+                valid_acs = get_product_dataframe(self.start_epoch, self.end_epoch)
+                self.finished.emit(valid_acs)
+            except Exception as e:
+                import traceback
+                tb = traceback.format_exc()
+                self.log.emit(f"[PPPDownloadWorker] Exception during run:\n{tb}")
+                self.error.emit(str(e))
+            return
+
+        # If products are specified, proceed to download
+        self.log.emit("[PPPDownloadWorker] Starting products download...")
         try:
+            # Make sure metadata downloaded (archiver usually archives them when it shouldn't)
+            download_metadata(download_dir=self.download_dir, log_callback=self.log.emit)
+
             # --- Force consumption of generator if returned ---
-            result = download_products(self.products, download_dir=self.download_dir,
-                                       start_time=self.start_epoch, end_time=self.end_epoch)
+            result = download_products(self.products, download_dir=self.download_dir, log_callback=self.log.emit,
+                                       dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch))
 
             # If a generator was returned, exhaust it
             if result is not None:
                 for _ in result:
                     pass
 
-            self.log.emit("✅ PPP product downloads completed.")
-
-            # --- Auxiliary product downloads ---
-            download_pea_auxiliary_products(self.start_epoch, self.end_epoch)
-
-            self.finished.emit(True, "✅ PPP + auxiliary products downloaded successfully.")
+            self.finished.emit("[PPPDownloadWorker] Downloaded all products successfully.")
 
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
-            self.log.emit(f"❌ Exception in PPPDownloadWorker.run:\n{tb}")
+            self.log.emit(f"[PPPDownloadWorker] Exception during run:\n{tb}")
             self.error.emit(str(e))
