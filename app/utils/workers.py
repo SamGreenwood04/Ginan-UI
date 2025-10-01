@@ -1,13 +1,17 @@
 # app/utils/workers.py
-
+import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from PySide6.QtCore import QObject, Signal, Slot, QRunnable
+from PySide6.QtWidgets import QTextEdit
+
 from app.models.dl_products import get_product_dataframe, download_products, get_brdc_urls, download_metadata
 from app.utils.common_dirs import INPUT_PRODUCTS_PATH
+
 
 class DownloadMetadataWorker(QObject):
     """
@@ -96,18 +100,13 @@ class PPPWorker(QObject):
 
         # If products are specified, proceed to download
         self.log.emit("[PPPDownloadWorker] Starting products download...")
+
         try:
-            # Make sure metadata downloaded (archiver usually archives them when it shouldn't)
+            # Make sure metadata downloaded (archiver is buggy atm)
             download_metadata(download_dir=self.download_dir, log_callback=self.log.emit)
 
-            # --- Force consumption of generator if returned ---
-            result = download_products(self.products, download_dir=self.download_dir, log_callback=self.log.emit,
-                                       dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch))
-
-            # If a generator was returned, exhaust it
-            if result is not None:
-                for _ in result:
-                    pass
+            download_products(self.products, download_dir=self.download_dir, log_callback=self.log.emit,
+                              dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch))
 
             self.finished.emit("[PPPDownloadWorker] Downloaded all products successfully.")
 

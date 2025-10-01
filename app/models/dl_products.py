@@ -1,5 +1,7 @@
 import gzip
+import os
 import shutil
+import sys
 from datetime import datetime, timedelta
 from http.client import HTTPException
 from pathlib import Path
@@ -8,7 +10,8 @@ from typing import Optional
 import unlzw3
 import pandas as pd
 import numpy as np
-from requests import HTTPError
+from requests import HTTPError, RequestException
+from tqdm import tqdm
 
 from app.utils.cddis_email import get_netrc_auth
 from app.utils.common_dirs import INPUT_PRODUCTS_PATH
@@ -19,6 +22,7 @@ from bs4 import BeautifulSoup, SoupStrainer
 BASE_URL = "https://cddis.nasa.gov/archive"
 GPS_ORIGIN = np.datetime64("1980-01-06 00:00:00") # Magic date from gn_functions
 MAX_RETRIES = 3
+CHUNK_SIZE = 8192  # 8 KiB
 
 METADATA = [
     "https://files.igs.org/pub/station/general/igs_satellite_metadata.snx",
@@ -207,28 +211,47 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
 
     # 3. Download then extract
     for i in range(MAX_RETRIES):
+        # Try resuming any partial downloads
+        partial = (compressed if compressed else decompressed).with_suffix(".part")
+        if partial.exists():
+            headers = {"Range": f"bytes={partial.stat().st_size}-"}
+            log(f"Resuming download of {filename} from byte {partial.stat().st_size}")
+        else:
+            headers = {"Range": "bytes=0-"}
+            log(f"Starting download of {filename}")
+
         try:
             # Download with session or request based on URL
             if url.startswith(BASE_URL):
-                resp = session.get(url, timeout=30)
+                resp = session.get(url, headers=headers, stream=True, timeout=30)
             else:
-                resp = requests.get(url, timeout=30)
+                resp = requests.get(url, headers=headers, stream=True, timeout=30)
             resp.raise_for_status()
+            if resp.status_code == 206:
+                mode = 'ab' if partial.exists() else 'wb'
+            else:
+                # likely 200 OK, server is sending the entire file again
+                mode = 'wb'
+            total_size = int(resp.headers.get("content-length"))
+            with open(partial, mode) as f_out:
+                with tqdm(total=total_size, unit='B', unit_scale=True, desc=filename) as pbar:
+                    for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
+                        if chunk: # Filters keep-alives
+                            f_out.write(chunk)
+                            pbar.update(len(chunk))
+                partial.rename(compressed if compressed else decompressed)
+                log(f"Download of {filename} complete.")
 
-            # Try extracting compressed files
+            # Download complete, extracting compressed files
             if compressed:
-                with open(compressed, "wb") as f_out:
-                    f_out.write(resp.content)
-                log(f"{compressed} downloaded, extracting to {decompressed}")
+                log(f"{filename} is compressed, extracting to {decompressed}")
                 return extract_file(filename, compressed, decompressed)
             else:
-                with open(decompressed, "wb") as f_out:
-                    f_out.write(resp.content)
-                log(f"{decompressed} downloaded.")
                 return decompressed
-        except (HTTPException, HTTPError) as e:
+        except RequestException as e:
             log(f"Failed attempt {i} to download {filename}: {e}")
-    return None
+
+    raise(Exception(f"Failed to download {filename} after {MAX_RETRIES} attempts"))
 
 def get_brdc_urls(start_time: datetime, end_time: datetime) -> list[str]:
     """
@@ -312,5 +335,27 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
             fin_dir = download_dir
         else:
             fin_dir = download_dir / "tables" if x[-2]=="tables" else download_dir
+        try:
+            download_file(url, sesh, fin_dir, log_callback)
+        except Exception as e:
+            log(f"Failed to download: {url}: {e}")
 
-        download_file(url, sesh, fin_dir, log_callback)
+if __name__ == "__main__":
+    # Test file download
+    sesh = requests.Session()
+    sesh.auth = get_netrc_auth()
+    filename = "COD0MGXFIN_20191950000_01D_01D_OSB.BIA"
+    if Path(f"{INPUT_PRODUCTS_PATH}/{filename}").exists():
+        os.remove(f"{INPUT_PRODUCTS_PATH}/{filename}")
+    download_file(f"{BASE_URL}/gnss/products/2062/{filename}.gz", sesh, INPUT_PRODUCTS_PATH)
+
+    # Download partial file
+    os.remove(f"{INPUT_PRODUCTS_PATH}/{filename}")
+    partial = Path(f"{INPUT_PRODUCTS_PATH}/{filename}.part")
+    req = sesh.get(f"{BASE_URL}/gnss/products/2062/{filename}.gz", headers={"Range": f"bytes=0-{CHUNK_SIZE}"}, stream=True)
+    with open(partial, "wb") as f_out: # Overwrites previous download
+        for chunk in req.iter_content(chunk_size=CHUNK_SIZE):
+            if chunk: # Filters keep-alives
+                f_out.write(chunk)
+    print(f"Downloaded {partial.stat().st_size} bytes to {partial}.\nAttempting to resume full download...")
+    download_file(f"{BASE_URL}/gnss/products/2062/{filename}.gz", sesh, INPUT_PRODUCTS_PATH)

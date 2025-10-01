@@ -6,10 +6,14 @@ import shutil
 from datetime import datetime
 from typing import Optional, Dict, Any
 
+from app.utils.common_dirs import INPUT_PRODUCTS_PATH
+
 
 def archive_old_outputs(output_dir: Path, visual_dir: Path = None):
     """
     Moves existing output files to an archive directory to keep the workspace clean.
+
+    THERE WILL BE ERRORS IF THIS IS THE SAME AS THE PRODUCT DIRECTORY.
 
     :param output_dir: Path to the user-selected output directory.
     :param visual_dir: Optional path to associated visualisation directory.
@@ -38,15 +42,16 @@ def archive_old_outputs(output_dir: Path, visual_dir: Path = None):
     else:
         print("📂 No previous outputs found to archive.")
 
-def archive_products(products_dir: Path, reason: str = "manual",
-                     exclude_patterns: Optional[list[str]] = None) -> Optional[Path]:
+def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "manual", startup_archival: bool = False,
+                     include_patterns: Optional[list[str]] = None) -> Optional[Path]:
     """
     Archive GNSS product files from products_dir into a timestamped subfolder
     under products_dir/archived/.
 
     :param products_dir: Directory containing GNSS product files
     :param reason: String describing why the archive is happening (e.g., "rinex_change", "ppp_selection_change")
-    :param exclude_patterns: Optional list of glob patterns to exclude from archiving
+    :param startup_archival: If True, archives files which are meant to be archived only once during app startup
+    :param include_patterns: Optional list of glob patterns to include when archiving
     :return: Path to the archive folder if files were archived, else None
     """
     if not products_dir.exists():
@@ -58,18 +63,34 @@ def archive_products(products_dir: Path, reason: str = "manual",
     archive_dir.mkdir(parents=True, exist_ok=True)
 
     product_patterns = [
-        "finals.data.iau2000.txt",  # EOP file
-        "BRDC*.rnx*",               # BRDC broadcast nav files
         "*.SP3",                    # precise orbit
         "*.CLK",                    # clock files
         "*.BIA",                    # biases
         "*.ION",                    # ionosphere products (if used)
         "*.TRO",                    # troposphere products (if used)
     ]
+    if startup_archival:
+        product_patterns += [
+            "finals.data.iau2000.txt",
+            "BRDC*.rnx*",
+            "igs_satellite_metadata.snx",
+            "igs20.atx",
+            "tables/ALOAD",
+            "tables/OLOAD",
+            "tables/gpt_25.grd",
+            "tables/igrf14coeffs.txt",
+            "tables/igrf13coeffs.txt",
+            "tables/DE436.1950.2050",
+            "tables/fes2014b_Cnm_Snm.dat",
+            "tables/opoleloadcoefcmcor.txt",
+            "tables/sat_yaw_bias_rate.snx",
+            "tables/bds_yaw_bias_modes.snx",
+            "tables/qzss_yaw_bias_modes.snx"
+        ]
 
     # Remove excluded patterns
-    if exclude_patterns:
-        product_patterns = [p for p in product_patterns if p not in exclude_patterns]
+    if include_patterns:
+        product_patterns += include_patterns
 
     archived_files = []
     for pattern in product_patterns:
@@ -100,7 +121,8 @@ def archive_products_if_rinex_changed(current_rinex: Path,
         return None
 
     logging.info("[products_manager] RINEX file changed — archiving old products.")
-    return archive_products(products_dir, reason="rinex_change")
+    # Shouldn't remove BRDC if date isn't changed but would require extracting current and last rnx
+    return archive_products(products_dir, reason="rinex_change", include_patterns=["BRDC*.rnx*"])
 
 
 def archive_products_if_selection_changed(current_selection: Dict[str, Any],
@@ -120,9 +142,5 @@ def archive_products_if_selection_changed(current_selection: Dict[str, Any],
                  if last_selection.get(k) != current_selection.get(k)}
         logging.info(f"[products_manager] PPP selection changed → differences: {diffs}")
 
-    return archive_products(
-        products_dir,
-        reason="ppp_selection_change",
-        exclude_patterns=["finals.data.iau2000.txt", "BRDC*.rnx*"]
-    )
+    return archive_products(products_dir,reason="ppp_selection_change")
 

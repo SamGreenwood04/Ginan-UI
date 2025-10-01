@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 import pandas as pd
 
 from app.models.dl_products import get_valid_analysis_centers, str_to_datetime
-from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QRunnable, Slot, QThreadPool, QThread
+from PySide6.QtCore import QObject, Signal, Qt, QDateTime, QThread
 from PySide6.QtGui import QStandardItemModel, QStandardItem
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QDoubleSpinBox,
     QHBoxLayout,
-    QPushButton,
     QVBoxLayout,
     QDateTimeEdit,
     QInputDialog,
@@ -32,11 +31,11 @@ from PySide6.QtWidgets import (
     QLabel
 )
 
-from app.models.execution import Execution, GENERATED_YAML, TEMPLATE_PATH, INPUT_PRODUCTS_PATH
+from app.models.execution import Execution, GENERATED_YAML, INPUT_PRODUCTS_PATH
 from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
-from app.utils.archive_manager import (archive_products_if_rinex_changed, archive_products_if_selection_changed)
-from app.utils.archive_manager import archive_old_outputs
+from app.models.archive_manager import (archive_products_if_rinex_changed)
+from app.models.archive_manager import archive_old_outputs
 from app.utils.workers import PPPWorker
 
 

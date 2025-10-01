@@ -1,9 +1,8 @@
-import os
 import threading
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QUrl, Signal, QObject, QThread, Slot, Qt
+from PySide6.QtCore import QUrl, Signal, QThread, Slot, Qt
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QTextCursor
@@ -16,7 +15,7 @@ from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
 from app.utils.cddis_email import get_username_from_netrc, write_email, test_cddis_connection
 from app.utils.workers import PeaExecutionWorker, PPPWorker
-from app.utils.archive_manager import archive_products_if_selection_changed
+from app.models.archive_manager import archive_products_if_selection_changed, archive_products
 from app.models.execution import INPUT_PRODUCTS_PATH
 
 # Optional toggle for development visualization testing
@@ -77,10 +76,10 @@ class MainWindow(QMainWindow):
         self.ui.rightLayout.addWidget(self.visSelector)
         self.visCtrl.bind_selector(self.visSelector)
 
-        # Validate CDDIS credentials
-        self._validate_cddis_credentials_once()
+        archive_products(INPUT_PRODUCTS_PATH, "startup_archival", True)
 
-        # Start validation and metadata download in a separate thread
+        # Validate connection then start metadata download in a separate thread
+        self._validate_cddis_credentials_once()
         thread = threading.Thread(target=download_metadata, daemon=True)
         thread.start()
 
@@ -139,7 +138,7 @@ class MainWindow(QMainWindow):
         )
         self.last_ppp_selection = current_selection
         if archive_dir:
-            self.log_message(f"📦 Archived old PPP products → {archive_dir}")
+           self.log_message(f"📦 Archived old PPP products → {archive_dir}")
 
         # List products to be downloaded
         x = self.inputCtrl.products_df
@@ -150,7 +149,7 @@ class MainWindow(QMainWindow):
 
         # Start download in background
         self.download_thread = QThread()
-        self.download_worker = PPPWorker(products=products, start_epoch=self.inputCtrl.start_time, end_epoch=self.inputCtrl.end_time,)
+        self.download_worker = PPPWorker(products=products, start_epoch=self.inputCtrl.start_time, end_epoch=self.inputCtrl.end_time)
         self.download_worker.moveToThread(self.download_thread)
 
         # Signals
