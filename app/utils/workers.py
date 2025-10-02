@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from PySide6.QtCore import QObject, Signal, Slot, QRunnable
+from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QTextEdit
 
 from app.models.dl_products import get_product_dataframe, download_products, get_brdc_urls, download_metadata
@@ -23,24 +23,45 @@ class DownloadMetadataWorker(QObject):
 
     def __init__(self):
         super().__init__()
+        self._stop = False
+
+    @Slot()
+    def stop(self):
+        self._stop = True
+        self.log.emit("[DownloadMetadataWorker] Stop requested.")
 
     @Slot()
     def run(self):
         try:
+            if self._stop:
+                self.finished.emit("[DownloadMetadataWorker] Cancelled before start.")
+                return
+
+            def _log_cb(msg: str):
+                self.log.emit(msg)
+                if self._stop:
+                    raise RuntimeError("Cancelled")
+
             self.log.emit("[DownloadMetadataWorker] Starting metadata download...")
-            download_metadata(log_callback=self.log.emit)
+            download_metadata(log_callback=_log_cb)
+
+            if self._stop:
+                self.finished.emit("[DownloadMetadataWorker] Cancelled.")
+                return
+
             self.finished.emit("[DownloadMetadataWorker] Metadata downloaded.")
         except Exception:
             tb = traceback.format_exc()
-            self.log.emit(f"[CDDISWorker] Exception:\n{tb}")
+            self.log.emit(f"[DownloadMetadataWorker] Exception:\n{tb}")
             self.error.emit(tb)
 
 
 class PeaExecutionWorker(QObject):
     """
     Executes execute_config() method of a given PEAExecution instance.
-
-    :param execution: An instance of PEAExecution.
+    The 'execution' object is expected to implement:
+      - execute_config()
+      - stop_all()  (optional but recommended: terminate underlying process)
     """
     finished = Signal(object)
     error = Signal(str)
@@ -51,6 +72,18 @@ class PeaExecutionWorker(QObject):
         self.execution = execution
 
     @Slot()
+    def stop(self):
+        try:
+            self.log.emit("[PeaExecutionWorker] Stop requested — terminating PEA...")
+            # 推荐在 Execution 里实现 stop_all()，用于终止子进程
+            if hasattr(self.execution, "stop_all"):
+                self.execution.stop_all()
+            self.finished.emit("[PeaExecutionWorker] Stopped.")
+        except Exception:
+            tb = traceback.format_exc()
+            self.error.emit(f"[PeaExecutionWorker] Exception during stop:\n{tb}")
+
+    @Slot()
     def run(self):
         try:
             self.log.emit("[PeaExecutionWorker] Starting PEA execution...")
@@ -59,6 +92,7 @@ class PeaExecutionWorker(QObject):
         except Exception:
             tb = traceback.format_exc()
             self.error.emit(f"[PeaExecutionWorker] Exception:\n{tb}")
+
 
 class PPPWorker(QObject):
     """
@@ -83,9 +117,20 @@ class PPPWorker(QObject):
         self.download_dir = download_dir
         self.start_epoch = start_epoch
         self.end_epoch = end_epoch
+        self._stop = False
+
+    @Slot()
+    def stop(self):
+        self._stop = True
+        self.log.emit("[PPPDownloadWorker] Stop requested.")
 
     @Slot()
     def run(self):
+        def _log_cb(msg: str):
+            self.log.emit(msg)
+            if self._stop:
+                raise RuntimeError("Cancelled")
+
         if self.products.empty and self.start_epoch and self.end_epoch:
             self.log.emit("[PPPDownloadWorker] No products specified, start and end epochs specified, returning valid analysis centers")
             try:
@@ -102,15 +147,18 @@ class PPPWorker(QObject):
         self.log.emit("[PPPDownloadWorker] Starting products download...")
 
         try:
+            # Ensure metadata present
             if self.products.empty and not self.start_epoch and not self.end_epoch:
-                self.log.emit("[PPPDownloadWorker] No products specified, start and end epochs not specified, downloading metadata")
+                self.log.emit(
+                    "[PPPDownloadWorker] No products specified, start and end epochs not specified, downloading metadata")
                 # Make sure metadata downloaded (archiver is buggy atm)
-                download_metadata(download_dir=self.download_dir, log_callback=self.log.emit, progress_callback=self.progress.emit)
+                download_metadata(download_dir=self.download_dir, log_callback=_log_cb, progress_callback=self.progress.emit)
+
             else:
                 self.log.emit("[PPPDownloadWorker] Products specified, downloading products")
-                download_products(self.products, download_dir=self.download_dir, log_callback=self.log.emit,
-                          dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch),
-                          progress_callback=self.progress.emit)
+                download_products(self.products, download_dir=self.download_dir, log_callback=_log_cb,
+                                  dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch),
+                                  progress_callback=self.progress.emit)
 
             self.finished.emit("[PPPDownloadWorker] Downloaded all products successfully.")
 

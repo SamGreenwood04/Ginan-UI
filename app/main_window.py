@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
+from PyQt6.QtCore import QRegularExpression
 from PySide6.QtCore import QUrl, Signal, QThread, Slot, Qt, QRegularExpression
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -22,7 +23,7 @@ test_visualisation = False
 
 
 def setup_main_window():
-    # compile_ui()  # Always recompile .ui files during development
+    compile_ui()  # Always recompile .ui files during development
     from app.views.main_window_ui import Ui_MainWindow
     return Ui_MainWindow()
 
@@ -95,6 +96,12 @@ class MainWindow(QMainWindow):
         self.metadata_worker.finished.connect(self.metadata_worker.deleteLater)
         self.metadata_thread.finished.connect(self.metadata_thread.deleteLater)
         self.metadata_thread.start()
+
+        # Added: wire an optional stop-all button if present in the UI
+        if hasattr(self.ui, "stopAllButton") and self.ui.stopAllButton:
+            self.ui.stopAllButton.clicked.connect(self.on_stop_all_clicked)
+        elif hasattr(self.ui, "btnStopAll") and self.ui.btnStopAll:
+            self.ui.btnStopAll.clicked.connect(self.on_stop_all_clicked)
 
     def log_message(self, msg: str):
         """Append a log line normally """
@@ -292,3 +299,46 @@ class MainWindow(QMainWindow):
 
         write_email(email_candidate)
         self.log_message(f"✉️ EMAIL set to: {email_candidate}")
+
+    # Added: unified stop entry, wired to an optional UI button
+    @Slot()
+    def on_stop_all_clicked(self):
+        self.log_message("🛑 Stop requested — stopping all running tasks...")
+
+        # Stop the metadata worker in InputController, if present
+        try:
+            if hasattr(self, "inputCtrl") and hasattr(self.inputCtrl, "stop_all"):
+                self.inputCtrl.stop_all()
+        except Exception:
+            pass
+
+        # Stop PPP downloads, if running
+        try:
+            if hasattr(self, "download_worker") and self.download_worker is not None and hasattr(self.download_worker, "stop"):
+                self.log_message("[UI] Stop → PPP downloads")
+                self.download_worker.stop()
+        except Exception:
+            pass
+
+        # Stop PEA execution, if running
+        try:
+            if hasattr(self, "worker") and self.worker is not None and hasattr(self.worker, "stop"):
+                self.log_message("[UI] Stop → PEA worker")
+                self.worker.stop()
+        except Exception:
+            pass
+
+        # Best-effort: ask Execution to stop any external process if supported
+        try:
+            if hasattr(self, "execution") and self.execution is not None and hasattr(self.execution, "stop_all"):
+                self.execution.stop_all()
+        except Exception:
+            pass
+
+        # Restore UI state immediately
+        try:
+            self._set_processing_state(False)
+        except Exception:
+            pass
+
+        self.log_message("🛑 Stop signals sent.")
