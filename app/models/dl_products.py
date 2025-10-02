@@ -172,16 +172,17 @@ def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
 
     return centers
 
-def extract_file(filename: str, compressed: Path, decompressed: Path) -> Path:
-    if filename.endswith((".gz", ".gzip")):
-        with gzip.open(compressed, "rb") as f_in, open(decompressed, "wb") as f_out:
+def extract_file(filepath: Path) -> Path:
+    finalpath = ".".join(str(filepath).split(".")[:-1])
+    if str(filepath.name).endswith((".gz", ".gzip")):
+        with gzip.open(filepath, "rb") as f_in, open(finalpath, "wb") as f_out:
             shutil.copyfileobj(f_in, f_out)
     elif filename.endswith(".Z"):
-        decompressed_data = unlzw3.unlzw(compressed)
-        with open(decompressed, "wb") as f_out:
+        decompressed_data = unlzw3.unlzw(filepath)
+        with open(finalpath, "wb") as f_out:
             f_out.write(decompressed_data)
-    compressed.unlink()
-    return decompressed
+    filepath.unlink()
+    return Path(finalpath)
 
 def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_PRODUCTS_PATH,
                   log_callback=None, progress_callback: Optional[Callable]=None) -> Path:
@@ -195,7 +196,7 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
         decompressed = Path(download_dir / ".".join(filename.split(".")[:-1]))
     else:
         compressed = None
-        decompressed = Path(download_dir / filename)
+        decompressed = filepath
 
     # 1. Ensure the file is not already downloaded
     if decompressed.exists():
@@ -206,7 +207,7 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
     if compressed and compressed.exists():
         log(f"Found {compressed}, extracting to {decompressed}")
         try:
-            return extract_file(filename, compressed, decompressed)
+            return extract_file(filepath)
         except Exception as e:
             log(f"Failed to extract {filename}: {e}")
 
@@ -250,13 +251,13 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
                             percent = int(downloaded / total_size * 100)
                             progress_callback(filename, percent)
 
-            partial.rename(filename)
+            partial.rename(filepath)
             log(f"Download of {filename} complete.")
 
             # Download complete, extracting compressed files
             if compressed:
                 log(f"{filename} is compressed, extracting to {decompressed}")
-                return extract_file(filename, compressed, decompressed)
+                return extract_file(filepath)
             else:
                 return decompressed
         except RequestException as e:
