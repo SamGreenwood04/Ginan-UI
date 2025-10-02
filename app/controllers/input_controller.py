@@ -1243,4 +1243,26 @@ class CredentialsDialog(QDialog):
         self.accept()
 
 
+# ===== Added: minimal unified stop entry for InputController background worker =====
+def _safe_call_stop(obj):
+    try:
+        if obj is not None and hasattr(obj, "stop"):
+            obj.stop()
+    except Exception:
+        pass
 
+def stop_all(self):
+    """
+    Best-effort stop for the metadata PPPWorker started by load_rnx_file().
+    Does nothing if the worker/thread are not present.
+    """
+    try:
+        if hasattr(self, "worker"):
+            _safe_call_stop(self.worker)
+            if hasattr(self, "ui") and hasattr(self.ui, "terminalTextEdit"):
+                self.ui.terminalTextEdit.append("[UI] Stop requested → metadata worker")
+    except Exception:
+        pass
+
+# Bind without touching existing class body
+setattr(InputController, "stop_all", stop_all)

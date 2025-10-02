@@ -2,6 +2,9 @@ import os
 import platform
 import shutil
 import subprocess
+import signal
+import threading
+import time
 from importlib.resources import files
 
 from ruamel.yaml.scalarstring import PlainScalarString
@@ -37,6 +40,8 @@ class Execution:
         self.config_path = config_path
         self.executable = get_pea_exec() # the PEA executable
         self.changes = False # Flag to track if config has been changed
+        self._procs = []  
+        self._stop_event = threading.Event()
 
         template_file = Path(TEMPLATE_PATH)
 
@@ -159,17 +164,89 @@ class Execution:
         self.changes = False
 
     def execute_config(self):
+        # 每次跑之前清停标记
+        self.reset_stop_flag()
+
         if self.changes:
             self.write_cached_changes()
             self.changes = False
 
-        command = [self.executable, "--config", self.config_path]
+        command = [self.executable, "--config", str(self.config_path)]
+        workdir = str(Path(self.config_path).parent)
+
         try:
-            # Run PEA using a subprocess at the directory "config_path"
-            subprocess.run(command, check=True, text=True,cwd=os.path.dirname(self.config_path))
-        except subprocess.CalledProcessError as e:
-            e.add_note("Error executing PEA command")
-            raise e
+            # 用进程组方式启动，保存句柄
+            p = self.spawn_process(command, cwd=workdir)
+
+            # 按行转发 stdout/stderr，期间可随时停止
+            assert p.stdout is not None and p.stderr is not None
+            while True:
+                if self._stop_event.is_set():
+                    # UI 点了“停止”，这里直接退出循环，收尾由 stop_all() 负责
+                    break
+
+                line = p.stdout.readline()
+                if line:
+                    print(line.rstrip())
+                else:
+                    # 没有新输出，检查是否已结束
+                    if p.poll() is not None:
+                        # 把剩余 stderr 打出来便于定位
+                        rest_err = p.stderr.read() or ""
+                        if rest_err:
+                            print(rest_err.rstrip())
+                        if p.returncode != 0:
+                            e = subprocess.CalledProcessError(p.returncode, command)
+                            e.add_note("Error executing PEA command")
+                            raise e
+                        break
+
+                # 轻微休眠避免忙轮询
+                time.sleep(0.01)
+
+        finally:
+            # 执行结束后，清理掉已结束的句柄
+            self._procs = [proc for proc in self._procs if proc.poll() is None]
+
+        # 统一的进程启动：用独立进程组，便于一键 kill（macOS/Linux）
+    def spawn_process(self, args, cwd=None, env=None) -> subprocess.Popen:
+        p = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,   # 关键：新会话=新进程组
+        )
+        self._procs.append(p)
+        return p
+
+    # 一键停止：置停标记 + 结束所有子进程组
+    def stop_all(self):
+        self._stop_event.set()
+
+        # 先尝试优雅终止
+        for p in list(self._procs):
+            try:
+                if p.poll() is None:
+                    os.killpg(p.pid, signal.SIGTERM)
+            except Exception:
+                pass
+
+        time.sleep(0.5)  # 给一点时间
+
+        # 仍未退出则强杀
+        for p in list(self._procs):
+            try:
+                if p.poll() is None:
+                    os.killpg(p.pid, signal.SIGKILL)
+            except Exception:
+                pass
+
+    def reset_stop_flag(self):
+        self._stop_event.clear()
+
 
     def build_pos_plots(self, out_dir=None):
         """
