@@ -239,8 +239,8 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
                         if chunk: # Filters keep-alives
                             f_out.write(chunk)
                             pbar.update(len(chunk))
-                partial.rename(compressed if compressed else decompressed)
-                log(f"Download of {filename} complete.")
+            partial.rename(compressed if compressed else decompressed)
+            log(f"Download of {filename} complete.")
 
             # Download complete, extracting compressed files
             if compressed:
