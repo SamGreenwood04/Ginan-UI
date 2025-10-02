@@ -17,5 +17,11 @@ def compile_ui():
     else:
         raise ImportError("Ensure pyside6-uic is installed and available on PATH.")
 
+    with open(output_file, 'r') as f:
+        lines = f.readlines()
+    lines[21] = "from app.resources import ginan_logo_rc"
+    with open(output_file, 'w') as f:
+        f.writelines(lines)
+
 if __name__ == "__main__":
     compile_ui()

@@ -22,7 +22,7 @@ test_visualisation = False
 
 
 def setup_main_window():
-    # compile_ui()  # Always recompile .ui files during development
+    compile_ui()  # Always recompile .ui files during development
     from app.views.main_window_ui import Ui_MainWindow
     return Ui_MainWindow()
 
@@ -206,11 +206,9 @@ class MainWindow(QMainWindow):
         if found_cursor.hasSelection():
             found_cursor.movePosition(QTextCursor.EndOfLine) # Replaces final percent symbol too
             found_cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
-            print(f"Updating selection: {found_cursor.selectedText()}")
             found_cursor.removeSelectedText()
             found_cursor.insertText(output)
         else:
-            print("No selection")
             self.ui.terminalTextEdit.setTextCursor(cursor)
             cursor.insertText("\n" + output)
 
