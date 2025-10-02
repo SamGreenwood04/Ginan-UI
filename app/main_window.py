@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QRegularExpression
 from PySide6.QtCore import QUrl, Signal, QThread, Slot, Qt, QRegularExpression
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
