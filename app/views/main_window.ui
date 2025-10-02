@@ -16,17 +16,38 @@
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
-     <widget class="QLabel" name="titleLabel">
-      <property name="font">
-       <font>
-        <pointsize>16</pointsize>
-        <bold>true</bold>
-       </font>
-      </property>
-      <property name="text">
-       <string>GINAN GNSS PROCESSING GUI</string>
-      </property>
-     </widget>
+      <layout class="QHBoxLayout" name="headerLayout">
+        <item>
+          <widget class="QLabel" name="logoLabel">
+            <property name="maximumSize">
+              <size>
+                <width>60</width>
+                <height>60</height>
+              </size>
+            </property>
+            <property name="scaledContents">
+              <bool>true</bool>
+            </property>
+            <property name="pixmap">
+              <pixmap>:/img/ginan-logo.png</pixmap>
+            </property>
+          </widget>
+        </item>
+        <item>
+          <widget class="QLabel" name="titleLabel">
+            <property name="font">
+              <font>
+                <pointsize>16</pointsize>
+                <weight>75</weight>
+                <bold>true</bold>
+              </font>
+            </property>
+            <property name="text">
+              <string>GINAN GNSS PROCESSING GUI</string>
+            </property>
+          </widget>
+        </item>
+      </layout>
     </item>
     <item>
      <layout class="QHBoxLayout" name="mainContentLayout">
@@ -723,6 +744,8 @@ li.checked::marker { content: &quot;\2612&quot;; }
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
  </widget>
- <resources/>
+ <resources>
+   <include location="../resources/ginan_logo.qrc"/>
+ </resources>
  <connections/>
 </ui>

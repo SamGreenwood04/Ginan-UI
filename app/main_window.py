@@ -1,4 +1,5 @@
 import threading
+import app.resources
 from pathlib import Path
 from typing import Optional
 
