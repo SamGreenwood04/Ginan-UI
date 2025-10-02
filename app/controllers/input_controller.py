@@ -127,12 +127,12 @@ class InputController(QObject):
         # Consistent tooltip style for all elements
         tooltip_style = """
                 QToolTip {
-                    background-color: #ffffcc;
-                    color: #000000;
+                    background-color: #2c5d7c;
+                    color: #ffffff;
                     border: 1px solid #999999;
                     padding: 4px;
                     border-radius: 3px;
-                    font-size: 11px;
+                    font:13pt "Segoe UI";
                 }
                 """
 
@@ -155,24 +155,25 @@ class InputController(QObject):
 
         # File selection buttons
         self.ui.observationsButton.setToolTip(
-            "Select a RINEX observation file (.rnx or .rnx.gz)\n"
-            "This will automatically extract metadata and populate the form fields"
+            "Select a RINEX observation file (.rnx or .rnx.gz).\n"
+            "This will automatically extract metadata and populate the UI fields."
         )
 
         self.ui.outputButton.setToolTip(
-            "Choose the directory where processing results will be saved\n"
-            "A subdirectory will be created for this processing session"
+            "Choose the directory where processing results will be saved.\n"
+            "Existing .POS or .GPX output in this directory will be saved in the archived subdirectory."
         )
 
         self.ui.processButton.setToolTip(
-            "Start the PPP processing using the configured parameters\n"
-            "Ensure all required fields are filled before processing"
+            "Start the Ginan (pea) PPP processing using the configured parameters.\n"
+            "Ensure all required fields are filled before processing."
         )
 
         # Configuration buttons
         self.ui.showConfigButton.setToolTip(
-            "Generate and open the YAML configuration file\n"
-            "You can review and modify advanced settings before processing"
+            "Generate and open the YAML configuration file.\n"
+            "You can review and modify advanced settings before processing.\n"
+            "Note: UI defined parameters will ALWAYS override manual config edits."
         )
 
         self.ui.cddisCredentialsButton.setToolTip(
@@ -200,14 +201,14 @@ class InputController(QObject):
         )
 
         self.ui.PPP_project.setToolTip(
-            "PPP product project type\n"
-            "Different projects offer varying latency and accuracy"
+            "PPP product project type.\n"
+            "Different projects types offer varying GNSS constellation PPP products."
         )
 
         self.ui.PPP_series.setToolTip(
             "PPP product series:\n"
-            "• RAP: Rapid (lower latency)\n"
-            "• ULT: Ultra-rapid\n"
+            "• ULT: Ultra-rapid (lower latency)\n"
+            "• RAP: Rapid \n"
             "• FIN: Final (highest accuracy)"
         )
 
