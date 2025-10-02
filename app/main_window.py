@@ -23,7 +23,7 @@ test_visualisation = False
 
 
 def setup_main_window():
-    compile_ui()  # Always recompile .ui files during development
+    # compile_ui()  # Always recompile .ui files during development
     from app.views.main_window_ui import Ui_MainWindow
     return Ui_MainWindow()
 
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
 
         total_length = 20
         filled_length = int(percent/100 * total_length)
-        bar = f"[{"█" * filled_length}{"░" * (total_length - filled_length)}]"
+        bar = '[' + "█" * filled_length + "░" * (total_length - filled_length) + ']'
         output = f"{filename[:30]} {bar} {percent:3d}%"
         search_pattern = QRegularExpression(f"^{filename[:30]}.+%$")
 
