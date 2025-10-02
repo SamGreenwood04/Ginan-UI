@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, timedelta
 from http.client import HTTPException
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any, Generator, Callable
 
 import unlzw3
 import pandas as pd
@@ -184,13 +184,14 @@ def extract_file(filename: str, compressed: Path, decompressed: Path) -> Path:
     return decompressed
 
 def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_PRODUCTS_PATH,
-                  log_callback=None) -> Optional[Path]:
+                  log_callback=None, progress_callback: Optional[Callable]=None) -> Path:
     def log(msg: str):
         log_callback(msg) if log_callback else print(msg)
 
     filename = url.split("/")[-1]
+    filepath = Path(download_dir / filename)
     if filename.endswith((".gz", ".gzip", ".Z")):
-        compressed = Path(download_dir / filename)
+        compressed = filepath
         decompressed = Path(download_dir / ".".join(filename.split(".")[:-1]))
     else:
         compressed = None
@@ -198,7 +199,7 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
 
     # 1. Ensure the file is not already downloaded
     if decompressed.exists():
-        log(f"{decompressed} already exists, skipping download")
+        log(f"{filename} already exists, skipping download")
         return decompressed
 
     # 2. Try extract from a compressed version
@@ -212,13 +213,16 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
     # 3. Download then extract
     for i in range(MAX_RETRIES):
         # Try resuming any partial downloads
-        partial = (compressed if compressed else decompressed).with_suffix(".part")
+        partial = Path(str(filepath.resolve()) + ".part").resolve()
         if partial.exists():
             headers = {"Range": f"bytes={partial.stat().st_size}-"}
             log(f"Resuming download of {filename} from byte {partial.stat().st_size}")
         else:
             headers = {"Range": "bytes=0-"}
             log(f"Starting download of {filename}")
+            os.makedirs(partial.parent, exist_ok=True)
+            ensure_file_exists = open(partial, "w")
+            ensure_file_exists.close()
 
         try:
             # Download with session or request based on URL
@@ -229,17 +233,24 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
             resp.raise_for_status()
             if resp.status_code == 206:
                 mode = 'ab' if partial.exists() else 'wb'
+                total_size = int(resp.headers.get("content-length")) + partial.stat().st_size
             else:
                 # likely 200 OK, server is sending the entire file again
                 mode = 'wb'
-            total_size = int(resp.headers.get("content-length"))
+                total_size = int(resp.headers.get("content-length"))
+
             with open(partial, mode) as f_out:
-                with tqdm(total=total_size, unit='B', unit_scale=True, desc=filename) as pbar:
-                    for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
-                        if chunk: # Filters keep-alives
-                            f_out.write(chunk)
-                            pbar.update(len(chunk))
-            partial.rename(compressed if compressed else decompressed)
+                downloaded = partial.stat().st_size
+                for chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
+                    if chunk: # Filters keep-alives
+                        f_out.write(chunk)
+                        downloaded += len(chunk)
+
+                        if progress_callback:
+                            percent = int(downloaded / total_size * 100)
+                            progress_callback(filename, percent)
+
+            partial.rename(filename)
             log(f"Download of {filename} complete.")
 
             # Download complete, extracting compressed files
@@ -272,26 +283,30 @@ def get_brdc_urls(start_time: datetime, end_time: datetime) -> list[str]:
     return urls
 
 def download_metadata(download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
+                      progress_callback: Optional[Callable] = None,
                       start_time: datetime=None, end_time: datetime=None):
     """
     download_products wrapper with defaults for downloading standard metadata files. If start_time and end_time are
     provided, BRDC files for the date range will also be downloaded.
 
+    :param progress_callback: Outputs download progress
     :param download_dir: Directory to save downloaded files
     :param log_callback: Optional callback function for log messages (message)
     :param start_time: REQUIRED for BRDC file downloads
     :param end_time: REQUIRED end time for BRDC file downloads
     """
     if start_time and end_time:
-        download_products(pd.DataFrame(), download_dir, log_callback, dl_urls=METADATA.extend(get_brdc_urls(start_time, end_time)))
+        download_products(pd.DataFrame(), download_dir, log_callback, dl_urls=METADATA.extend(get_brdc_urls(start_time, end_time)),
+                          progress_callback=progress_callback)
     else:
-        download_products(pd.DataFrame(), download_dir, log_callback, dl_urls=METADATA)
+        download_products(pd.DataFrame(), download_dir, log_callback, dl_urls=METADATA, progress_callback=progress_callback)
 
 def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
-                      dl_urls: list=None):
+                      dl_urls: list=None, progress_callback: Optional[Callable] = None):
     """
     Downloads all products in the provided DataFrame to the specified directory.
 
+    :param progress_callback: Outputs download progress
     :param products : DataFrame (from get_product_dataframe) of all products to download
     :param download_dir: Directory to save downloaded files
     :param log_callback: Optional callback function for log messages (message)
@@ -302,7 +317,6 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
         log_callback(msg) if log_callback else print(msg)
 
     # 1. Retrieve filenames from the DataFrame
-    log(f"📦 Found {len(products)} files in DataFrame")
     downloads = []
     for _, row in products.iterrows():
         gps_week = date_to_gpswk(row.date)
@@ -325,6 +339,7 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
     if dl_urls:
         downloads.extend(dl_urls)
 
+    log(f"📦 {len(downloads)} files to check or download")
     download_dir.mkdir(parents=True, exist_ok=True)
     (download_dir / "tables").mkdir(parents=True, exist_ok=True)
     sesh = requests.Session()
@@ -336,7 +351,7 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
         else:
             fin_dir = download_dir / "tables" if x[-2]=="tables" else download_dir
         try:
-            download_file(url, sesh, fin_dir, log_callback)
+            download_file(url, sesh, fin_dir, log_callback, progress_callback)
         except Exception as e:
             log(f"Failed to download: {url}: {e}")
 

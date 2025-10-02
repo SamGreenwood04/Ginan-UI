@@ -73,11 +73,11 @@ class PPPWorker(QObject):
     """
     finished = Signal(object)
     error = Signal(str)
-    progress = Signal(int)
+    progress = Signal(str, int)
     log = Signal(str)
 
-    def __init__(self, start_epoch: datetime, end_epoch: datetime, download_dir: Path=INPUT_PRODUCTS_PATH,
-                 products: pd.DataFrame=pd.DataFrame()):
+    def __init__(self, start_epoch: Optional[datetime]=None, end_epoch: Optional[datetime]=None,
+                 download_dir: Path=INPUT_PRODUCTS_PATH, products: pd.DataFrame=pd.DataFrame()):
         super().__init__()
         self.products = products
         self.download_dir = download_dir
@@ -86,8 +86,8 @@ class PPPWorker(QObject):
 
     @Slot()
     def run(self):
-        if self.products.empty:
-            self.log.emit("[PPPDownloadWorker] No products specified, returning valid analysis centers...")
+        if self.products.empty and self.start_epoch and self.end_epoch:
+            self.log.emit("[PPPDownloadWorker] No products specified, start and end epochs specified, returning valid analysis centers")
             try:
                 valid_acs = get_product_dataframe(self.start_epoch, self.end_epoch)
                 self.finished.emit(valid_acs)
@@ -102,11 +102,15 @@ class PPPWorker(QObject):
         self.log.emit("[PPPDownloadWorker] Starting products download...")
 
         try:
-            # Make sure metadata downloaded (archiver is buggy atm)
-            download_metadata(download_dir=self.download_dir, log_callback=self.log.emit)
-
-            download_products(self.products, download_dir=self.download_dir, log_callback=self.log.emit,
-                              dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch))
+            if self.products.empty and not self.start_epoch and not self.end_epoch:
+                self.log.emit("[PPPDownloadWorker] No products specified, start and end epochs not specified, downloading metadata")
+                # Make sure metadata downloaded (archiver is buggy atm)
+                download_metadata(download_dir=self.download_dir, log_callback=self.log.emit, progress_callback=self.progress.emit)
+            else:
+                self.log.emit("[PPPDownloadWorker] Products specified, downloading products")
+                download_products(self.products, download_dir=self.download_dir, log_callback=self.log.emit,
+                          dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch),
+                          progress_callback=self.progress.emit)
 
             self.finished.emit("[PPPDownloadWorker] Downloaded all products successfully.")
 

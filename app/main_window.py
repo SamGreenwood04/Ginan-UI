@@ -1,12 +1,10 @@
-import threading
-import app.resources
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QUrl, Signal, QThread, Slot, Qt
+from PySide6.QtCore import QUrl, Signal, QThread, Slot, Qt, QRegularExpression
 from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QComboBox
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QTextCursor, QTextDocument
 
 from app.models.dl_products import download_metadata
 from app.utils.cddis_credentials import validate_netrc as gui_validate_netrc
@@ -24,7 +22,7 @@ test_visualisation = False
 
 
 def setup_main_window():
-    compile_ui()  # Always recompile .ui files during development
+    # compile_ui()  # Always recompile .ui files during development
     from app.views.main_window_ui import Ui_MainWindow
     return Ui_MainWindow()
 
@@ -81,8 +79,22 @@ class MainWindow(QMainWindow):
 
         # Validate connection then start metadata download in a separate thread
         self._validate_cddis_credentials_once()
-        thread = threading.Thread(target=download_metadata, daemon=True)
-        thread.start()
+
+        self.metadata_thread = QThread()
+        self.metadata_worker = PPPWorker()
+        self.metadata_worker.moveToThread(self.metadata_thread)
+
+        # Signals
+        self.metadata_thread.started.connect(self.metadata_worker.run)
+        self.metadata_worker.progress.connect(self._on_download_progress)
+        self.metadata_worker.log.connect(self.log_message)
+        self.metadata_worker.error.connect(self._on_download_error)
+
+        # Cleanup
+        self.metadata_worker.finished.connect(self.metadata_thread.quit)
+        self.metadata_worker.finished.connect(self.metadata_worker.deleteLater)
+        self.metadata_thread.finished.connect(self.metadata_thread.deleteLater)
+        self.metadata_thread.start()
 
     def log_message(self, msg: str):
         """Append a log line normally """
@@ -173,33 +185,29 @@ class MainWindow(QMainWindow):
         """Update progress display in-place at the bottom of the UI terminal."""
         self.download_progress[filename] = percent
 
-        # Build progress summary
-        lines = []
-        for f, p in self.download_progress.items():
-            total_length = 20
-            filled_length = int(p/100 * total_length)
-            bar = "█" * filled_length + " " * (filled_length - total_length)
-            lines.append(f"{f:30} [{bar}] {p:3d}%")
-        text = "\n".join(lines)
+        total_length = 20
+        filled_length = int(percent/100 * total_length)
+        bar = f"[{"█" * filled_length}{"░" * (total_length - filled_length)}]"
+        output = f"{filename[:30]} {bar} {percent:3d}%"
+        search_pattern = QRegularExpression(f"^{filename[:30]}.+%$")
 
         # Work with cursor & doc
         cursor = self.ui.terminalTextEdit.textCursor()
-        doc = self.ui.terminalTextEdit.document()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.movePosition(QTextCursor.End)
+        flags = QTextDocument.FindFlag.FindBackward
+        found_cursor = self.ui.terminalTextEdit.document().find(search_pattern, cursor, flags)
 
-        # Progress block = last N lines, where N = number of tracked files
-        block = doc.findBlockByNumber(doc.blockCount() - len(self.download_progress))
-        if block.isValid():
-            # Replace old progress block
-            cursor.setPosition(block.position())
-            cursor.movePosition(QTextCursor.MoveOperation.End)
-            cursor.removeSelectedText()
-            cursor.insertText(text)
+        if found_cursor.hasSelection():
+            found_cursor.movePosition(QTextCursor.EndOfLine) # Replaces final percent symbol too
+            found_cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
+            print(f"Updating selection: {found_cursor.selectedText()}")
+            found_cursor.removeSelectedText()
+            found_cursor.insertText(output)
         else:
-            # First time → just append bars
-            cursor.insertText("\n" + text)
+            print("No selection")
+            self.ui.terminalTextEdit.setTextCursor(cursor)
+            cursor.insertText("\n" + output)
 
-        self.ui.terminalTextEdit.setTextCursor(cursor)
 
     def _on_download_finished(self, message):
         self.log_message(message)

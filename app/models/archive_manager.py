@@ -70,7 +70,7 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
         "*.TRO",                    # troposphere products (if used)
     ]
     if startup_archival:
-        product_patterns += [
+        product_patterns.extend([
             "finals.data.iau2000.txt",
             "BRDC*.rnx*",
             "igs_satellite_metadata.snx",
@@ -86,11 +86,11 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
             "tables/sat_yaw_bias_rate.snx",
             "tables/bds_yaw_bias_modes.snx",
             "tables/qzss_yaw_bias_modes.snx"
-        ]
+        ])
 
     # Remove excluded patterns
     if include_patterns:
-        product_patterns += include_patterns
+        product_patterns.extend(include_patterns)
 
     archived_files = []
     for pattern in product_patterns:
@@ -103,7 +103,7 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
                 logging.warning(f"[products_manager] Failed to archive {file.name}: {e}")
 
     if archived_files:
-        logging.info(f"[products_manager] Archived {len(archived_files)} files → {archive_dir}")
+        logging.info(f"[products_manager] Archived {", ".join(archived_files)} → {archive_dir}")
         return archive_dir
     else:
         logging.info("[products_manager] No matching product files found to archive.")
