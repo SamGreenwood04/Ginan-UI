@@ -177,7 +177,7 @@ def extract_file(filepath: Path) -> Path:
     if str(filepath.name).endswith((".gz", ".gzip")):
         with gzip.open(filepath, "rb") as f_in, open(finalpath, "wb") as f_out:
             shutil.copyfileobj(f_in, f_out)
-    elif filename.endswith(".Z"):
+    elif str(filepath.name).endswith(".Z"):
         decompressed_data = unlzw3.unlzw(filepath)
         with open(finalpath, "wb") as f_out:
             f_out.write(decompressed_data)
