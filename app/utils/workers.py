@@ -11,49 +11,6 @@ from app.models.dl_products import get_product_dataframe, download_products, get
 from app.utils.common_dirs import INPUT_PRODUCTS_PATH
 
 
-class DownloadMetadataWorker(QObject):
-    """
-    Downloads metadata that doesn't require a specific date range.
-    """
-    finished = Signal(object)
-    error = Signal(str)
-    log = Signal(str)
-
-    def __init__(self):
-        super().__init__()
-        self._stop = False
-
-    @Slot()
-    def stop(self):
-        self._stop = True
-        self.log.emit("[DownloadMetadataWorker] Stop requested.")
-
-    @Slot()
-    def run(self):
-        try:
-            if self._stop:
-                self.finished.emit("[DownloadMetadataWorker] Cancelled before start.")
-                return
-
-            def _log_cb(msg: str):
-                self.log.emit(msg)
-                if self._stop:
-                    raise RuntimeError("Cancelled")
-
-            self.log.emit("[DownloadMetadataWorker] Starting metadata download...")
-            download_metadata(log_callback=_log_cb)
-
-            if self._stop:
-                self.finished.emit("[DownloadMetadataWorker] Cancelled.")
-                return
-
-            self.finished.emit("[DownloadMetadataWorker] Metadata downloaded.")
-        except Exception:
-            tb = traceback.format_exc()
-            self.log.emit(f"[DownloadMetadataWorker] Exception:\n{tb}")
-            self.error.emit(tb)
-
-
 class PeaExecutionWorker(QObject):
     """
     Executes execute_config() method of a given PEAExecution instance.
@@ -97,6 +54,7 @@ class PPPWorker(QObject):
     Downloads PPP and BRDC products for a specified date range or retrieves valid analysis centers.
 
     LEAVE PRODUCTS EMPTY TO RETURN VALID ANALYSIS CENTERS.
+    LEAVE START, END, AND PRODUCTS EMPTY TO DOWNLOAD METADATA.
 
     :param products: DataFrame of products to download. (See get_product_dataframe())
     :param download_dir: Directory to save downloaded products.
@@ -130,30 +88,26 @@ class PPPWorker(QObject):
                 raise RuntimeError("Cancelled")
 
         if self.products.empty and self.start_epoch and self.end_epoch:
-            self.log.emit("[PPPDownloadWorker] No products specified, start and end epochs specified, returning valid analysis centers")
+            self.log.emit("[PPPDownloadWorker] Retrieving valid analysis centers")
             try:
                 valid_acs = get_product_dataframe(self.start_epoch, self.end_epoch)
                 self.finished.emit(valid_acs)
             except Exception as e:
-                import traceback
                 tb = traceback.format_exc()
-                self.log.emit(f"[PPPDownloadWorker] Exception during run:\n{tb}")
+                self.log.emit(f"[PPPDownloadWorker] Error whilst retrieving valid analysis centers:\n{tb}")
                 self.error.emit(str(e))
             return
-
-        # If products are specified, proceed to download
-        self.log.emit("[PPPDownloadWorker] Starting products download...")
 
         try:
             # Ensure metadata present
             if self.products.empty and not self.start_epoch and not self.end_epoch:
                 self.log.emit(
-                    "[PPPDownloadWorker] No products specified, start and end epochs not specified, downloading metadata")
+                    "[PPPDownloadWorker] Downloading pre-processing metadata")
                 # Make sure metadata downloaded (archiver is buggy atm)
                 download_metadata(download_dir=self.download_dir, log_callback=_log_cb, progress_callback=self.progress.emit)
 
             else:
-                self.log.emit("[PPPDownloadWorker] Products specified, downloading products")
+                self.log.emit("[PPPDownloadWorker] Downloading specified products")
                 download_products(self.products, download_dir=self.download_dir, log_callback=_log_cb,
                                   dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch),
                                   progress_callback=self.progress.emit)
@@ -161,7 +115,6 @@ class PPPWorker(QObject):
             self.finished.emit("[PPPDownloadWorker] Downloaded all products successfully.")
 
         except Exception as e:
-            import traceback
             tb = traceback.format_exc()
-            self.log.emit(f"[PPPDownloadWorker] Exception during run:\n{tb}")
+            self.log.emit(f"[PPPDownloadWorker] Error whilst downloading data:\n{tb}")
             self.error.emit(str(e))

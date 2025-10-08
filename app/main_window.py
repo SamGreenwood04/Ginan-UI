@@ -97,9 +97,9 @@ class MainWindow(QMainWindow):
 
         # Added: wire an optional stop-all button if present in the UI
         if hasattr(self.ui, "stopAllButton") and self.ui.stopAllButton:
-            self.ui.stopAllButton.clicked.connect(self.on_stop_all_clicked)
+            self.ui.stopAllButton.clicked.connect(self.on_stopAllClicked)
         elif hasattr(self.ui, "btnStopAll") and self.ui.btnStopAll:
-            self.ui.btnStopAll.clicked.connect(self.on_stop_all_clicked)
+            self.ui.btnStopAll.clicked.connect(self.on_stopAllClicked)
 
     def log_message(self, msg: str):
         """Append a log line normally """
@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
 
     # Added: unified stop entry, wired to an optional UI button
     @Slot()
-    def on_stop_all_clicked(self):
+    def on_stopAllClicked(self):
         self.log_message("🛑 Stop requested — stopping all running tasks...")
 
         # Stop the metadata worker in InputController, if present
