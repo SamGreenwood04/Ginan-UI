@@ -198,7 +198,7 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
 
     # 2. Try extract from a compressed version
     if compressed and compressed.exists():
-        log(f"Found {compressed}, extracting to {decompressed}")
+        log(f"Found a compressed file, attempting to extract {filename}")
         try:
             return extract_file(filepath)
         except Exception as e:
@@ -245,11 +245,10 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
                             progress_callback(filename, percent)
 
             partial.rename(filepath)
-            log(f"Download of {filename} complete.")
 
-            # Download complete, extracting compressed files
+            # Extract if compressed
+            log(f"Download of {filename} complete.")
             if compressed:
-                log(f"{filename} is compressed, extracting to {decompressed}")
                 return extract_file(filepath)
             else:
                 return decompressed
@@ -333,7 +332,7 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
     if dl_urls:
         downloads.extend(dl_urls)
 
-    log(f"📦 {len(downloads)} files to check or download")
+    log(f"📦 {len(downloads)} to check or download")
     download_dir.mkdir(parents=True, exist_ok=True)
     (download_dir / "tables").mkdir(parents=True, exist_ok=True)
     sesh = requests.Session()
