@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
         self.output_dir: Optional[str] = None
         self.download_progress: dict[str, int] = {}  # track per-file progress
         self.is_processing = False
+        self.atx_required_for_rnx_extraction = False # File required to extract info from RINEX
 
         # Visualisation widgets
         self.openInBrowserBtn = QPushButton("Open in Browser", self)
@@ -88,6 +89,8 @@ class MainWindow(QMainWindow):
         self.metadata_worker.progress.connect(self._on_download_progress)
         self.metadata_worker.log.connect(self.log_message)
         self.metadata_worker.error.connect(self._on_download_error)
+        self.metadata_worker.finished.connect(self._on_metadata_download_finished)
+        self.metadata_worker.atx_downloaded.connect(self._on_atx_downloaded)
 
         # Cleanup
         self.metadata_worker.finished.connect(self.metadata_thread.quit)
@@ -210,7 +213,15 @@ class MainWindow(QMainWindow):
         else:
             self.ui.terminalTextEdit.setTextCursor(cursor)
             cursor.insertText("\n" + output)
+            cursor.movePosition(QTextCursor.End)
+            self.ui.terminalTextEdit.setTextCursor(cursor)
 
+    def _on_atx_downloaded(self, filename: str):
+        self.atx_required_for_rnx_extraction = True
+        self.log_message(f"✅ ATX file {filename} installed - ready for RINEX parsing.")
+
+    def _on_metadata_download_finished(self, message):
+        self.log_message(message)
 
     def _on_download_finished(self, message):
         self.log_message(message)

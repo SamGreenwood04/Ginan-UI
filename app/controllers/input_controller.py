@@ -280,7 +280,11 @@ class InputController(QObject):
             result = extractor.extract_rinex_data(self.rnx_file)
 
             # Verify antenna_type against .atx file
-            self.verify_antenna_type(result)
+            if not self.parent.atx_required_for_rnx_extraction:
+                self.ui.terminalTextEdit.append(
+                    "⚠️ ANTEX (.atx) file not installed yet. Antenna type verification will be skipped.")
+            else:
+                self.verify_antenna_type(result)
 
             self.ui.terminalTextEdit.append("🔍 Scanning CDDIS archive for PPP products. Please wait...")
 
@@ -1093,7 +1097,7 @@ class InputController(QObject):
         path, _ = QFileDialog.getOpenFileName(
             parent, 
             "Select RINEX Observation File", 
-            "", 
+            "",
             "RINEX Observation Files (*.rnx *.rnx.gz);;All Files (*.*)"
         )
         return path or ""

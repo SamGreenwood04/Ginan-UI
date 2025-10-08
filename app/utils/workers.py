@@ -65,6 +65,7 @@ class PPPWorker(QObject):
     error = Signal(str)
     progress = Signal(str, int)
     log = Signal(str)
+    atx_downloaded = Signal(str)
 
     def __init__(self, start_epoch: Optional[datetime]=None, end_epoch: Optional[datetime]=None,
                  download_dir: Path=INPUT_PRODUCTS_PATH, products: pd.DataFrame=pd.DataFrame()):
@@ -88,29 +89,30 @@ class PPPWorker(QObject):
                 raise RuntimeError("Cancelled")
 
         if self.products.empty and self.start_epoch and self.end_epoch:
-            self.log.emit("[PPPDownloadWorker] Retrieving valid analysis centers")
+            self.log.emit("[PPPDownloadWorker] Retrieving valid products")
             try:
-                valid_acs = get_product_dataframe(self.start_epoch, self.end_epoch)
-                self.finished.emit(valid_acs)
+                valid_products = get_product_dataframe(self.start_epoch, self.end_epoch)
+                self.finished.emit(valid_products)
             except Exception as e:
                 tb = traceback.format_exc()
-                self.log.emit(f"[PPPDownloadWorker] Error whilst retrieving valid analysis centers:\n{tb}")
+                self.log.emit(f"[PPPDownloadWorker] Error whilst retrieving valid products:\n{tb}")
                 self.error.emit(str(e))
             return
 
         try:
             # Ensure metadata present
             if self.products.empty and not self.start_epoch and not self.end_epoch:
-                self.log.emit(
-                    "[PPPDownloadWorker] Downloading pre-processing metadata")
+                self.log.emit("[PPPDownloadWorker] Checking pre-processing metadata installed")
                 # Make sure metadata downloaded (archiver is buggy atm)
-                download_metadata(download_dir=self.download_dir, log_callback=_log_cb, progress_callback=self.progress.emit)
+                download_metadata(download_dir=self.download_dir, log_callback=_log_cb, progress_callback=self.progress.emit,
+                                  atx_callback=self.atx_downloaded.emit)
 
             else:
                 self.log.emit("[PPPDownloadWorker] Downloading specified products")
-                download_products(self.products, download_dir=self.download_dir, log_callback=_log_cb,
+                for _ in download_products(self.products, download_dir=self.download_dir, log_callback=_log_cb,
                                   dl_urls=get_brdc_urls(self.start_epoch, self.end_epoch),
-                                  progress_callback=self.progress.emit)
+                                  progress_callback=self.progress.emit):
+                    pass
 
             self.finished.emit("[PPPDownloadWorker] Downloaded all products successfully.")
 

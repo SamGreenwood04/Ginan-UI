@@ -55,7 +55,7 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
     :return: Path to the archive folder if files were archived, else None
     """
     if not products_dir.exists():
-        logging.warning(f"[products_manager] Products dir {products_dir} does not exist.")
+        logging.warning(f"[Archiver] Products dir {products_dir} does not exist.")
         return None
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -69,26 +69,38 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
         "*.ION",                    # ionosphere products (if used)
         "*.TRO",                    # troposphere products (if used)
     ]
-    if startup_archival:
-        product_patterns.extend([
-            "finals.data.iau2000.txt",
-            "BRDC*.rnx*",
-            "igs_satellite_metadata.snx",
-            "igs20.atx",
-            "tables/ALOAD",
-            "tables/OLOAD",
-            "tables/gpt_25.grd",
-            "tables/igrf14coeffs.txt",
-            "tables/igrf13coeffs.txt",
-            "tables/DE436.1950.2050",
-            "tables/fes2014b_Cnm_Snm.dat",
-            "tables/opoleloadcoefcmcor.txt",
-            "tables/sat_yaw_bias_rate.snx",
-            "tables/bds_yaw_bias_modes.snx",
-            "tables/qzss_yaw_bias_modes.snx"
-        ])
 
-    # Remove excluded patterns
+    if startup_archival:
+        startup_patterns = [
+            "finals.data.iau2000.txt",
+            "BRDC*.rnx",
+            "igs_satellite_metadata*.snx",
+            "igs20*.atx",
+            "tables/ALOAD*",
+            "tables/OLOAD*",
+            "tables/gpt_*.grd",
+            "tables/qzss_*"
+            "tables/igrf*coeffs.txt",
+            "tables/DE436*",
+            "tables/fes2014*.dat",
+            "tables/opoleloadcoefcmcor.txt",
+            "tables/sat_yaw*.snx",
+            "tables/bds_yaw*.snx",
+            "tables/qzss_yaw*.snx",
+            "tables/bds_yaw*.snx"
+        ]
+        # Ensure directories exist
+        products_dir.mkdir(parents=True, exist_ok=True)
+        (products_dir / "tables").mkdir(parents=True, exist_ok=True)
+
+        for pattern in startup_patterns:
+            for file in products_dir.glob(pattern):
+                creation_time = datetime.fromtimestamp(file.stat().st_ctime)
+                if (datetime.now() - creation_time).days > 7:
+                    logging.info(f"[Archiver] Startup archival: {file.name} is older than 7 days, archiving.")
+                    product_patterns.append(pattern)
+
+    # Include explicit patterns if provided
     if include_patterns:
         product_patterns.extend(include_patterns)
 
@@ -100,13 +112,13 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
                 shutil.move(str(file), str(target))
                 archived_files.append(file.name)
             except Exception as e:
-                logging.warning(f"[products_manager] Failed to archive {file.name}: {e}")
+                logging.warning(f"[Archiver] Failed to archive {file.name}: {e}")
 
     if archived_files:
-        logging.info(f"[products_manager] Archived {", ".join(archived_files)} → {archive_dir}")
+        logging.info(f"[Archiver] Archived {', '.join(archived_files)} → {archive_dir}")
         return archive_dir
     else:
-        logging.info("[products_manager] No matching product files found to archive.")
+        logging.info("[Archiver] No matching product files found to archive.")
         return None
 
 
@@ -117,10 +129,10 @@ def archive_products_if_rinex_changed(current_rinex: Path,
     If the RINEX file has changed since last load, archive the cached products.
     """
     if last_rinex and current_rinex.resolve() == last_rinex.resolve():
-        logging.info("[products_manager] RINEX file unchanged — skipping product cleanup.")
+        logging.info("[Archiver] RINEX file unchanged — skipping product cleanup.")
         return None
 
-    logging.info("[products_manager] RINEX file changed — archiving old products.")
+    logging.info("[Archiver] RINEX file changed — archiving old products.")
     # Shouldn't remove BRDC if date isn't changed but would require extracting current and last rnx
     return archive_products(products_dir, reason="rinex_change", include_patterns=["BRDC*.rnx*"])
 
@@ -133,14 +145,14 @@ def archive_products_if_selection_changed(current_selection: Dict[str, Any],
     Excludes BRDC and finals.data.iau2000.txt since they are reusable.
     """
     if last_selection and current_selection == last_selection:
-        logging.info("[products_manager] PPP product selection unchanged — skipping product cleanup.")
+        logging.info("[Archiver] PPP product selection unchanged — skipping product cleanup.")
         return None
 
     if last_selection:
         diffs = {k: (last_selection.get(k), current_selection.get(k))
                  for k in set(last_selection) | set(current_selection)
                  if last_selection.get(k) != current_selection.get(k)}
-        logging.info(f"[products_manager] PPP selection changed → differences: {diffs}")
+        logging.info(f"[Archiver] PPP selection changed → differences: {diffs}")
 
     return archive_products(products_dir,reason="ppp_selection_change")
 
