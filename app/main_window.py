@@ -65,6 +65,7 @@ class MainWindow(QMainWindow):
         self.download_progress: dict[str, int] = {}  # track per-file progress
         self.is_processing = False
         self.atx_required_for_rnx_extraction = False # File required to extract info from RINEX
+        self.metadata_downloaded = False
 
         # Visualisation widgets
         self.openInBrowserBtn = QPushButton("Open in Browser", self)
@@ -222,6 +223,8 @@ class MainWindow(QMainWindow):
 
     def _on_metadata_download_finished(self, message):
         self.log_message(message)
+        self.metadata_downloaded = True
+        self.inputCtrl.try_enable_process_button()
 
     def _on_download_finished(self, message):
         self.log_message(message)

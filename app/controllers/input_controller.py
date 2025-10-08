@@ -583,7 +583,7 @@ class InputController(QObject):
 
         # Enable process button
         # MainWindow owns when to enable processButton. This controller exposes a helper if needed.
-        self.enable_process_button()
+        self.try_enable_process_button()
 
         # Always update MainWindow's state
         self.parent.output_dir = self.output_dir
@@ -593,8 +593,14 @@ class InputController(QObject):
             print(f"[DEBUG InputCtrl] Emitting ready with rnx={self.rnx_file}, out={self.output_dir}")
             self.ready.emit(str(self.rnx_file), str(self.output_dir))
 
-    def enable_process_button(self):
+    def try_enable_process_button(self):
         """Public helper so other components can enable the Process button without knowing UI internals."""
+        if not self.parent.metadata_downloaded:
+            return
+        if not self.output_dir:
+            return
+        if not self.rnx_file:
+            return
         self.ui.processButton.setEnabled(True)
 
     #endregion
