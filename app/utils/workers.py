@@ -1,5 +1,4 @@
 # app/utils/workers.py
-import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -7,7 +6,6 @@ from typing import Optional
 
 import pandas as pd
 from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QTextEdit
 
 from app.models.dl_products import get_product_dataframe, download_products, get_brdc_urls, download_metadata
 from app.utils.common_dirs import INPUT_PRODUCTS_PATH

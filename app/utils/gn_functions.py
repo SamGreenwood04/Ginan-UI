@@ -1,7 +1,6 @@
 """Base time conversion functions"""
 
 from datetime import datetime as _datetime
-from pathlib import Path as _Path
 import logging
 import shutil
 import os as _os

@@ -1,7 +1,6 @@
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedSeq, CommentedMap
 from ruamel.yaml.scalarstring import PlainScalarString
-from ruamel.yaml.representer import RepresenterError
 from pathlib import Path
 import tempfile
 import os

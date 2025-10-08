@@ -1,23 +1,16 @@
-import gzip
-import os
-import shutil
-import sys
-from datetime import datetime, timedelta
-from http.client import HTTPException
-from pathlib import Path
-from typing import Optional, Any, Generator, Callable
-
-import unlzw3
+import gzip, os, shutil, unlzw3, requests
 import pandas as pd
 import numpy as np
-from requests import HTTPError, RequestException
-from tqdm import tqdm
+
+from bs4 import BeautifulSoup, SoupStrainer
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Optional, Callable
 
 from app.utils.cddis_email import get_netrc_auth
 from app.utils.common_dirs import INPUT_PRODUCTS_PATH
-from app.utils.gn_functions import GPSDate, download_url
-import requests
-from bs4 import BeautifulSoup, SoupStrainer
+from app.utils.gn_functions import GPSDate
+
 
 BASE_URL = "https://cddis.nasa.gov/archive"
 GPS_ORIGIN = np.datetime64("1980-01-06 00:00:00") # Magic date from gn_functions
@@ -260,7 +253,7 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
                 return extract_file(filepath)
             else:
                 return decompressed
-        except RequestException as e:
+        except requests.RequestException as e:
             log(f"Failed attempt {i} to download {filename}: {e}")
 
     raise(Exception(f"Failed to download {filename} after {MAX_RETRIES} attempts"))
@@ -275,7 +268,7 @@ def get_brdc_urls(start_time: datetime, end_time: datetime) -> list[str]:
     """
     urls = []
     reference_dt = start_time - timedelta(days=1)
-    while (end_time - reference_dt).total_seconds() > 0:
+    while int((end_time - reference_dt).total_seconds()) > 0:
         day = reference_dt.strftime("%j")
         filename = f"BRDC00IGS_R_{reference_dt.year}{day}0000_01D_MN.rnx.gz"
         url = f"{BASE_URL}/gnss/data/daily/{reference_dt.year}/brdc/{filename}"

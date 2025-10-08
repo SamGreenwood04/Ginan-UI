@@ -6,7 +6,6 @@ from PySide6.QtWidgets import QMainWindow, QDialog, QVBoxLayout, QPushButton, QC
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QTextCursor, QTextDocument
 
-from app.models.dl_products import download_metadata
 from app.utils.cddis_credentials import validate_netrc as gui_validate_netrc
 from app.models.execution import Execution
 from app.utils.ui_compilation import compile_ui

@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from typing import Tuple
 import netrc
-import base64
 import requests
 
 ENV_FILE = Path(__file__).resolve().parent / "CDDIS.env"

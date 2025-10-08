@@ -17,6 +17,7 @@ def compile_ui():
     else:
         raise ImportError("Ensure pyside6-uic is installed and available on PATH.")
 
+    # Manually fix the file path to the logo resource
     with open(output_file, 'r') as f:
         lines = f.readlines()
     lines[21] = "from app.resources import ginan_logo_rc"
