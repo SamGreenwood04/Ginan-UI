@@ -270,6 +270,12 @@ class InputController(QObject):
             last_rinex=getattr(self, "last_rinex_path", None),
             products_dir=INPUT_PRODUCTS_PATH
         )
+        # Disable until new providers found
+        if current_rinex_path != getattr(self, "last_rinex_path", None):
+            self.ui.processButton.setEnabled(False)
+            self._on_cddis_ready(pd.DataFrame(), False) # Clears providers until worker completes
+
+
         self.last_rinex_path = current_rinex_path
         self.rnx_file = str(current_rinex_path)
 
@@ -471,12 +477,22 @@ class InputController(QObject):
         combo.lineEdit().setText(", ".join(constellations))
         self.ui.constellationsValue.setText(", ".join(constellations))
 
-    def _on_cddis_ready(self, data: pd.DataFrame):
+    def _on_cddis_ready(self, data: pd.DataFrame, log_messages: bool=True):
         self.products_df = data
+
+        if data.empty:
+            self.valid_analysis_centers = []
+            self.ui.PPP_provider.clear()
+            self.ui.PPP_provider.addItem("None")
+            self.ui.PPP_series.clear()
+            self.ui.PPP_series.addItem("None")
+            return
+
         self.valid_analysis_centers = list(get_valid_analysis_centers(self.products_df))
 
         if len(self.valid_analysis_centers) == 0:
-            self.ui.terminalTextEdit.append("⚠️ No valid PPP providers found.")
+            if log_messages:
+                self.ui.terminalTextEdit.append("⚠️ No valid PPP providers found.")
             self.ui.PPP_provider.clear()
             self.ui.PPP_provider.addItem("None")
             self.ui.PPP_series.clear()
@@ -487,11 +503,13 @@ class InputController(QObject):
         self.ui.PPP_provider.clear()
         self.ui.PPP_provider.addItems(self.valid_analysis_centers)
         self.ui.PPP_provider.setCurrentIndex(0)
-        self.ui.PPP_provider.blockSignals(False)
 
         # Update PPP_series based on default PPP_provider
+        self.ui.PPP_provider.blockSignals(False)
+        self.try_enable_process_button()
         self._on_ppp_provider_changed(self.valid_analysis_centers[0])
-        self.ui.terminalTextEdit.append(f"✅ CDDIS archive scan complete. Found PPP product providers: {', '.join(self.valid_analysis_centers)}")
+        if log_messages:
+            self.ui.terminalTextEdit.append(f"✅ CDDIS archive scan complete. Found PPP product providers: {', '.join(self.valid_analysis_centers)}")
 
     def _on_cddis_error(self, msg):
         self.ui.terminalTextEdit.append(f"Error loading CDDIS data: {msg}")
@@ -600,6 +618,8 @@ class InputController(QObject):
         if not self.output_dir:
             return
         if not self.rnx_file:
+            return
+        if len(self._get_ppp_provider_items()) < 1:
             return
         self.ui.processButton.setEnabled(True)
 
@@ -1197,7 +1217,7 @@ class InputController(QObject):
     def _get_ppp_provider_items(self) -> List[str]:
         if hasattr(self, "valid_analysis_centers") and self.valid_analysis_centers:
             return self.valid_analysis_centers
-        return ["None (select RNX file first)"]
+        return []
 
     @staticmethod
     def _get_ppp_series_items() -> List[str]:

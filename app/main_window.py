@@ -13,7 +13,7 @@ from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
 from app.utils.cddis_email import get_username_from_netrc, write_email, test_cddis_connection
 from app.utils.workers import PeaExecutionWorker, PPPWorker
-from app.models.archive_manager import archive_products_if_selection_changed, archive_products
+from app.models.archive_manager import archive_products_if_selection_changed, archive_products, archive_old_outputs
 from app.models.execution import INPUT_PRODUCTS_PATH
 
 # Optional toggle for development visualization testing
@@ -161,6 +161,10 @@ class MainWindow(QMainWindow):
         self.last_ppp_selection = current_selection
         if archive_dir:
            self.log_message(f"📦 Archived old PPP products → {archive_dir}")
+
+        output_archive = archive_old_outputs(Path(self.output_dir), archive_dir)
+        if output_archive:
+            self.log_message(f" Archived old outputs → {output_archive}")
 
         # List products to be downloaded
         x = self.inputCtrl.products_df
