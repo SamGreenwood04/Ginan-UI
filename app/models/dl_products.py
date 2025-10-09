@@ -297,7 +297,7 @@ def download_metadata(download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
             atx_callback(download.name)
 
 def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
-                      dl_urls: list=None, progress_callback: Optional[Callable] = None) -> Generator[Path]:
+                      dl_urls: list=None, progress_callback: Optional[Callable] = None) -> Generator[Path, None, None]:
     """
     Downloads all products in the provided DataFrame to the specified directory.
 
@@ -306,7 +306,7 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
     :param download_dir: Directory to save downloaded files
     :param log_callback: Optional callback function for log messages (message)
     :param dl_urls: Optional list of additional URLs to download (e.g. BRDC files)
-    :returns: None if not in generator mode; otherwise yields (filename, percent) tuples
+    :yields Paths to downloaded files:
     """
     def log(msg: str):
         log_callback(msg) if log_callback else print(msg)
