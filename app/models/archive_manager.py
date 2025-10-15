@@ -13,7 +13,8 @@ def archive_old_outputs(output_dir: Path, visual_dir: Path = None):
     """
     Moves existing output files to an archive directory to keep the workspace clean.
 
-    THERE WILL BE ERRORS IF THIS IS THE SAME AS THE PRODUCT DIRECTORY.
+    THIS FUNCTION LOOKS FOR ALL TXT, LOG, JSON, POS files.
+    DON'T USE THE INPUT PRODUCTS DIRECTORY.
 
     :param output_dir: Path to the user-selected output directory.
     :param visual_dir: Optional path to associated visualisation directory.
@@ -93,6 +94,7 @@ def archive_products(products_dir: Path = INPUT_PRODUCTS_PATH, reason: str = "ma
         products_dir.mkdir(parents=True, exist_ok=True)
         (products_dir / "tables").mkdir(parents=True, exist_ok=True)
 
+        # Scans every file and checks created within 7 days
         for pattern in startup_patterns:
             for file in products_dir.glob(pattern):
                 creation_time = datetime.fromtimestamp(file.stat().st_ctime)
