@@ -186,22 +186,6 @@ class VisualisationController(QObject):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        """
-        Function:
-          Handle double-click events to open the visualisation externally.
-
-        Arguments:
-          obj (QObject): The source object.
-          event (QEvent): The event being filtered.
-
-        Returns:
-          bool: True if handled, False otherwise.
-        """
-        if event.type() == QEvent.MouseButtonDblClick:
-            self.open_current_external()
-            return True
-        return super().eventFilter(obj, event)
 
     def _embed_html(self, file_path: str):
         """
