@@ -1,6 +1,7 @@
 import gzip, os, shutil, unlzw3, requests
 import pandas as pd
 import numpy as np
+from PySide6.QtCore import Signal
 
 from bs4 import BeautifulSoup, SoupStrainer
 from datetime import datetime, timedelta
@@ -150,7 +151,6 @@ def get_valid_analysis_centers(data: pd.DataFrame) -> set[str]:
             if group.loc[i]["date"] + group.loc[i]["period"] < group.loc[i+1]["date"]:
                 print(f"Gap detected for {center} { _type} {_format} between {group.loc[i, 'date']} and {group.loc[i+1, 'date']}")
                 data = data[data["analysis_center"] != center and data["solution_type"] != _type and data["format"] != _format]
-                break
 
     # 4. Report results
     centers = set()
@@ -179,7 +179,7 @@ def extract_file(filepath: Path) -> Path:
     return Path(finalpath)
 
 def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_PRODUCTS_PATH,
-                  log_callback=None, progress_callback: Optional[Callable]=None) -> Path:
+                  log_callback=None, progress_callback: Optional[Callable]=None, stop_requested: Callable=None) -> Path:
     def log(msg: str):
         log_callback(msg) if log_callback else print(msg)
 
@@ -211,7 +211,7 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
             log(f"Starting new download of {filepath.name}")
             os.makedirs(_partial.parent, exist_ok=True)
 
-            # Hacky bug fix for a windows error when open(_partial, "wb") not creating new files
+            # Hack?! for windows error when open(_partial, "wb") not creating new files
             ensure_file_exists = open(_partial, "w")
             ensure_file_exists.close()
 
@@ -235,6 +235,9 @@ def download_file(url: str, session: requests.Session, download_dir: Path=INPUT_
             with open(_partial, mode) as partial_out:
                 downloaded = _partial.stat().st_size
                 for _chunk in resp.iter_content(chunk_size=CHUNK_SIZE):
+                    if stop_requested and stop_requested():
+                        raise RuntimeError("Stop requested during download.")
+
                     if _chunk: # Filters keep-alives
                         partial_out.write(_chunk)
                         downloaded += len(_chunk)
@@ -263,7 +266,7 @@ def get_brdc_urls(start_time: datetime, end_time: datetime) -> list[str]:
     :returns: List of BRDC file URLs
     """
     urls = []
-    reference_dt = start_time - timedelta(days=1)
+    reference_dt = start_time
     while int((end_time - reference_dt).total_seconds()) > 0:
         day = reference_dt.strftime("%j")
         filename = f"BRDC00IGS_R_{reference_dt.year}{day}0000_01D_MN.rnx.gz"
@@ -287,20 +290,18 @@ def download_metadata(download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
     :param atx_callback: Optional callback function when igs20.atx is downloaded (downloaded_file)
     :returns: None
     """
-    _metadata = METADATA.copy()
-    if start_time and end_time:
-        _metadata.extend(get_brdc_urls(start_time, end_time))
-
     for download in download_products(products = pd.DataFrame(), download_dir=download_dir, log_callback=log_callback,
-                                      progress_callback=progress_callback, dl_urls=_metadata):
+                                      progress_callback=progress_callback, dl_urls=METADATA):
         if atx_callback and download.name == "igs20.atx":
             atx_callback(download.name)
 
 def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_PATH, log_callback=None,
-                      dl_urls: list=None, progress_callback: Optional[Callable] = None) -> Generator[Path, None, None]:
+                      dl_urls: list=None, progress_callback: Optional[Callable] = None,
+                      stop_requested: Callable=None) -> Generator[Path, None, None]:
     """
     Downloads all products in the provided DataFrame to the specified directory.
 
+    :param stop_requested: raise a RuntimError if requested
     :param progress_callback: Outputs download progress
     :param products : DataFrame (from get_product_dataframe) of all products to download
     :param download_dir: Directory to save downloaded files
@@ -345,10 +346,7 @@ def download_products(products: pd.DataFrame, download_dir: Path=INPUT_PRODUCTS_
             fin_dir = download_dir
         else:
             fin_dir = download_dir / "tables" if _x[-2]=="tables" else download_dir
-        try:
-            yield download_file(url, _sesh, fin_dir, log_callback, progress_callback)
-        except Exception as e:
-            log(f"Failed to download: {url}: {e}")
+        yield download_file(url, _sesh, fin_dir, log_callback, progress_callback, stop_requested)
 
 if __name__ == "__main__":
     # Test whole file download
