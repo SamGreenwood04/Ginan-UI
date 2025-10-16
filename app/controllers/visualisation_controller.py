@@ -88,13 +88,13 @@ class VisualisationController(QObject):
 
             else:
                 # When compiled with pyinstaller, LD_LIBRARY_PATH is modified which prevents external app opening
-                original = os.environ.get("LD_LIBRARY_PATH_ORIG")
-                current = os.environ.get("LD_LIBRARY_PATH")
+                env = os.environ.copy()
+                original = env.get("LD_LIBRARY_PATH_ORIG")
                 if original:
-                    os.environ["LD_LIBRARY_PATH"] = original  # Restore original value
-                QDesktopServices.openUrl(url)
-                if original:
-                    os.environ["LD_LIBRARY_PATH"] = current
+                    env["LD_LIBRARY_PATH"] = original  # Restore original value
+                else:
+                    env.pop("LD_LIBRARY_PATH", None)  # Clear the value to use sys defaults
+                subprocess.run(["xdg-open", url.url()], env=env)
         except Exception as e:
             print(f"Error occured trying to open in browser: {e}")
 
