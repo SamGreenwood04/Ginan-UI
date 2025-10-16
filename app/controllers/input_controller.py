@@ -47,7 +47,7 @@ from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
 from app.models.archive_manager import (archive_products_if_rinex_changed)
 from app.models.archive_manager import archive_old_outputs
-from app.utils.workers import PPPWorker
+from app.utils.workers import DownloadWorker
 
 
 class InputController(QObject):
@@ -348,10 +348,10 @@ class InputController(QObject):
 
             self.ui.terminalTextEdit.append("🔍 Scanning CDDIS archive for PPP products. Please wait...")
 
-            # Kick off CDDIS PPP products query in background thread
+            # Retrieve valid analysis centers
             start_epoch = str_to_datetime(result['start_epoch'])
             end_epoch = str_to_datetime(result['end_epoch'])
-            self.worker = PPPWorker(start_epoch=start_epoch, end_epoch=end_epoch)
+            self.worker = DownloadWorker(start_epoch=start_epoch, end_epoch=end_epoch, analysis_centers=True)
             self.metadata_thread = QThread()
             self.worker.moveToThread(self.metadata_thread)
 
@@ -1336,20 +1336,25 @@ class InputController(QObject):
         
         try:
             abs_path = os.path.abspath(file_path)
-            
+
             # Open the file with the appropriate method for the operating system
             if platform.system() == "Windows":
                 os.startfile(abs_path)
-                print("Opened with default Windows application")
-                
-            elif platform.system() == "Darwin":  # macOS
+                return
+
+            if platform.system() == "Darwin":  # macOS
                 subprocess.run(["open", abs_path])
-                print("Opened with default macOS application")
                 
             else:  # Linux and other Unix-like systems
-                subprocess.run(["xdg-open", abs_path])
-                print("Opened with default Linux application")
-                
+                # When compiled with pyinstaller, LD_LIBRARY_PATH is modified which prevents external app opening
+                env = os.environ.copy()
+                original = env.get("LD_LIBRARY_PATH_ORIG")
+                if original:
+                    env["LD_LIBRARY_PATH"] = original # Restore original value
+                else:
+                    env.pop("LD_LIBRARY_PATH", None) # Clear the value to use sys defaults
+                subprocess.run(["xdg-open", abs_path], env=env)
+
         except Exception as e:
             error_message = f"Cannot open config file:\n{file_path}\n\nError: {str(e)}"
             print(f"Error: {error_message}")
@@ -1801,8 +1806,8 @@ def stop_all(self):
     try:
         if hasattr(self, "worker"):
             _safe_call_stop(self.worker)
-            if hasattr(self, "ui") and hasattr(self.ui, "terminalTextEdit"):
-                self.ui.terminalTextEdit.append("[UI] Stop requested → metadata worker")
+            # if hasattr(self, "ui") and hasattr(self.ui, "terminalTextEdit"):
+                # self.ui.terminalTextEdit.append("[UI] Stop requested → metadata worker")
     except Exception:
         pass
 

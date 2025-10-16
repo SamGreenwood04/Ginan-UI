@@ -12,7 +12,7 @@ from app.utils.ui_compilation import compile_ui
 from app.controllers.input_controller import InputController
 from app.controllers.visualisation_controller import VisualisationController
 from app.utils.cddis_email import get_username_from_netrc, write_email, test_cddis_connection
-from app.utils.workers import PeaExecutionWorker, PPPWorker
+from app.utils.workers import PeaExecutionWorker, DownloadWorker
 from app.models.archive_manager import archive_products_if_selection_changed, archive_products, archive_old_outputs
 from app.models.execution import INPUT_PRODUCTS_PATH
 
@@ -21,7 +21,7 @@ test_visualisation = False
 
 
 def setup_main_window():
-    compile_ui()  # Always recompile .ui files during development
+    # compile_ui()  # Always recompile .ui files during development
     from app.views.main_window_ui import Ui_MainWindow
     return Ui_MainWindow()
 
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
         self._validate_cddis_credentials_once()
 
         self.metadata_thread = QThread()
-        self.metadata_worker = PPPWorker()
+        self.metadata_worker = DownloadWorker()
         self.metadata_worker.moveToThread(self.metadata_thread)
 
         # Signals
@@ -175,7 +175,7 @@ class MainWindow(QMainWindow):
 
         # Start download in background
         self.download_thread = QThread()
-        self.download_worker = PPPWorker(products=products, start_epoch=self.inputCtrl.start_time, end_epoch=self.inputCtrl.end_time)
+        self.download_worker = DownloadWorker(products=products, start_epoch=self.inputCtrl.start_time, end_epoch=self.inputCtrl.end_time)
         self.download_worker.moveToThread(self.download_thread)
 
         # Signals
@@ -189,6 +189,9 @@ class MainWindow(QMainWindow):
         self.download_worker.finished.connect(self.download_thread.quit)
         self.download_worker.finished.connect(self.download_worker.deleteLater)
         self.download_thread.finished.connect(self.download_thread.deleteLater)
+
+        self.download_worker.error.connect(self.download_thread.quit)
+        self.download_worker.error.connect(self.download_worker.deleteLater)
 
         self.log_message("📡 Starting PPP product downloads...")
         self.download_thread.start()
@@ -210,12 +213,13 @@ class MainWindow(QMainWindow):
         flags = QTextDocument.FindFlag.FindBackward
         found_cursor = self.ui.terminalTextEdit.document().find(search_pattern, cursor, flags)
 
-        if found_cursor.hasSelection():
+        on_latest_5_lines = self.ui.terminalTextEdit.document().blockCount() - found_cursor.blockNumber() <= 5
+        if found_cursor.hasSelection() and on_latest_5_lines:
             found_cursor.movePosition(QTextCursor.EndOfLine) # Replaces final percent symbol too
             found_cursor.movePosition(QTextCursor.StartOfLine, QTextCursor.KeepAnchor)
             found_cursor.removeSelectedText()
             found_cursor.insertText(output)
-        else:
+        else: # Make new progress bar
             self.ui.terminalTextEdit.setTextCursor(cursor)
             cursor.insertText("\n" + output)
             cursor.movePosition(QTextCursor.End)
@@ -329,7 +333,7 @@ class MainWindow(QMainWindow):
         # Stop PPP downloads, if running
         try:
             if hasattr(self, "download_worker") and self.download_worker is not None and hasattr(self.download_worker, "stop"):
-                self.log_message("[UI] Stop → PPP downloads")
+                # self.log_message("[UI] Stop → PPP downloads")
                 self.download_worker.stop()
         except Exception:
             pass
@@ -337,7 +341,7 @@ class MainWindow(QMainWindow):
         # Stop PEA execution, if running
         try:
             if hasattr(self, "worker") and self.worker is not None and hasattr(self.worker, "stop"):
-                self.log_message("[UI] Stop → PEA worker")
+                # self.log_message("[UI] Stop → PEA worker")
                 self.worker.stop()
         except Exception:
             pass
@@ -355,4 +359,4 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        self.log_message("🛑 Stop signals sent.")
+        # self.log_message("🛑 Stop signals sent.")

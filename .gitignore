@@ -21,3 +21,22 @@ app/resources/*.yaml
 # Test output files
 tests/resources/outputData/
 tests/resources/inputData/
+
+# Data files that should not be tracked
+*.rnx.gz
+*.clk.Z
+*.sp3.Z
+*.txt
+*.grd.gz
+*.atx
+*.snx
+*.snx.gz
+DE436.*
+emr*
+finals.data.*
+gpt_*
+igrf*
+igs*
+ngs*
+opole*
+sat_yaw*
