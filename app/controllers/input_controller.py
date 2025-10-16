@@ -36,7 +36,7 @@ from app.models.rinex_extractor import RinexExtractor
 from app.utils.cddis_credentials import save_earthdata_credentials
 from app.models.archive_manager import (archive_products_if_rinex_changed)
 from app.models.archive_manager import archive_old_outputs
-from app.utils.workers import PPPWorker
+from app.utils.workers import DownloadWorker
 
 
 class InputController(QObject):
@@ -294,10 +294,10 @@ class InputController(QObject):
 
             self.ui.terminalTextEdit.append("🔍 Scanning CDDIS archive for PPP products. Please wait...")
 
-            # Kick off CDDIS PPP products query in background thread
+            # Retrieve valid analysis centers
             start_epoch = str_to_datetime(result['start_epoch'])
             end_epoch = str_to_datetime(result['end_epoch'])
-            self.worker = PPPWorker(start_epoch=start_epoch, end_epoch=end_epoch)
+            self.worker = DownloadWorker(start_epoch=start_epoch, end_epoch=end_epoch, analysis_centers=True)
             self.metadata_thread = QThread()
             self.worker.moveToThread(self.metadata_thread)
 
@@ -1289,8 +1289,8 @@ def stop_all(self):
     try:
         if hasattr(self, "worker"):
             _safe_call_stop(self.worker)
-            if hasattr(self, "ui") and hasattr(self.ui, "terminalTextEdit"):
-                self.ui.terminalTextEdit.append("[UI] Stop requested → metadata worker")
+            # if hasattr(self, "ui") and hasattr(self.ui, "terminalTextEdit"):
+                # self.ui.terminalTextEdit.append("[UI] Stop requested → metadata worker")
     except Exception:
         pass
 
