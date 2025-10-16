@@ -8,48 +8,96 @@ URS = "urs.earthdata.nasa.gov"
 CDDIS = "cddis.nasa.gov"
 
 def _win_user_home() -> Path:
+    """
+    Return the Windows user home path.
+
+    Arguments:
+      None
+
+    Returns:
+      Path: Path to the current user's home directory on Windows; falls back to Path.home() if env var is missing.
+
+    Example (Optional):
+      >>> isinstance(_win_user_home(), Path)
+      True
+    """
     return Path(os.environ.get("USERPROFILE", str(Path.home())))
 
 def netrc_candidates() -> tuple[Path, ...]:
     """
-    Return possible credential file paths on the local machine:
-      - Windows: first return %USERPROFILE%\\.netrc (used by your HTTPS script), then return %USERPROFILE%\\_netrc
-      - macOS/Linux: return ~/.netrc
+    Return possible credential file paths on this OS.
+
+    Arguments:
+      None
+
+    Returns:
+      tuple[Path, ...]: Candidate paths to search/write `.netrc`-style credentials. On Windows: (%USERPROFILE%\\.netrc, %USERPROFILE%\\_netrc); on macOS/Linux: (~/.netrc,).
+
+    Example (Optional):
+      >>> tuple(map(lambda p: p.name, netrc_candidates()))  # doctest: +ELLIPSIS
+      ('...netrc',) or ('...netrc', '_netrc')
     """
     if platform.system().lower().startswith("win"):
         return (_win_user_home() / ".netrc", _win_user_home() / "_netrc")
     return (Path.home() / ".netrc",)
 
 def _write_text_secure(p: Path, content: str) -> None:
+    """
+    Write text to a file, applying secure permissions on non-Windows.
+
+    Arguments:
+      p (Path): Target file path.
+      content (str): File content to write (UTF-8).
+
+    Returns:
+      None
+
+    Example (Optional):
+      >>> from pathlib import Path  # smoke test only
+    """
     p.write_text(content, encoding="utf-8")
     if not platform.system().lower().startswith("win"):
         os.chmod(p, stat.S_IRUSR | stat.S_IWUSR)  # 0600
 
 def save_earthdata_credentials(username: str, password: str) -> tuple[Path, ...]:
     """
-    Save Earthdata credentials; write entries for two hosts at once (URS + CDDIS).
-    - Windows: write both .netrc and _netrc (ensures your HTTPS script can find .netrc, and the toolchain can use _netrc)
-    - macOS/Linux: write ~/.netrc and set permission to 600
-    Return the list of actual file paths written.
+    Save Earthdata credentials for both URS and CDDIS hosts.
+
+    Arguments:
+      username (str): Earthdata (URS/CDDIS) account username.
+      password (str): Earthdata (URS/CDDIS) account password.
+
+    Returns:
+      tuple[Path, ...]: The list of credential files written. Also sets environment variable NETRC to the preferred file.
+
+    Example (Optional):
+      >>> paths = save_earthdata_credentials("user", "pass")  # doctest: +SKIP
+      >>> len(paths) >= 1
+      True
     """
-    # need to see if this overrides the existing .netrc file
     content = (
         f"machine {URS}   login {username} password {password}\n"
         f"machine {CDDIS} login {username} password {password}\n"
     )
     written: list[Path] = []
     for p in netrc_candidates():
-        # Windows writes two files; *nix writes one file.
         _write_text_secure(p, content)
         written.append(p)
-    # For easier lookup by certain libraries
     os.environ["NETRC"] = str(written[0])
     return tuple(written)
 
 def _ensure_windows_mirror() -> None:
     """
-    If only _netrc exists without .netrc, automatically create a copy as .netrc on Windows
-    to support download_products_https.py (which reads ~/.netrc).
+    Ensure .netrc exists by mirroring _netrc on Windows if necessary.
+
+    Arguments:
+      None
+
+    Returns:
+      None
+
+    Example (Optional):
+      >>> _ensure_windows_mirror()  # no-op on non-Windows
     """
     if not platform.system().lower().startswith("win"):
         return
@@ -62,16 +110,21 @@ def _ensure_windows_mirror() -> None:
 
 def validate_netrc(required=(URS, CDDIS)) -> tuple[bool, str]:
     """
-    Validate whether usable credentials exist:
-      - Windows: if only _netrc exists, automatically mirror it as .netrc
-      - Check that all required hosts have login/password
-      - Set the NETRC environment variable to point to the preferred file
-        (on Windows: .netrc; on *nix: ~/.netrc)
-    Return (ok, path or error reason)
+    Validate presence and completeness of Earthdata credentials.
+
+    Arguments:
+      required (tuple[str, ...]): Hostnames that must have valid entries.
+
+    Returns:
+      tuple[bool, str]: If valid, (True, path-to-netrc). If invalid, (False, reason).
+
+    Example (Optional):
+      >>> ok, info = validate_netrc()  # doctest: +SKIP
+      >>> ok in (True, False)
+      True
     """
     _ensure_windows_mirror()
     candidates = netrc_candidates()
-    # Use the first existing file as the “preferred” one (on Windows: .netrc; on *nix: ~/.netrc)
     p = next((c for c in candidates if c.exists()), candidates[0])
     if not p.exists():
         return False, f"not found: {p}"

@@ -14,7 +14,6 @@ NOTE:  UI widgets for selecting visualisation (e.g. a ComboBox or QListWidget)
        which can be called once those widgets are added.
 """
 from __future__ import annotations
-
 import os
 import platform
 import subprocess
@@ -31,12 +30,26 @@ ROOT = HERE.parents[2]
 DEFAULT_OUT_DIR = ROOT / "tests" / "resources" / "outputData" / "visual"
 
 class VisualisationController(QObject):
-    """Manage visualisation panel interactions."""
+    """
+    Function:
+      Manage interactions and rendering inside the visualisation panel.
 
+    Example:
+      >>> controller = VisualisationController(ui, parent)
+      >>> controller.set_html_files(["plot.html"])
+    """
+    
     def __init__(self, ui, parent_window):
         """
-        :param ui:
-        :param parent_window:
+        Function:
+          Initialize the visualisation controller.
+
+        Arguments:
+          ui: The main window UI instance.
+          parent_window: The parent QMainWindow or controller.
+
+        Example:
+          >>> ctrl = VisualisationController(ui, main_window)
         """
         super().__init__(parent_window)
         self.ui = ui  # Ui_MainWindow instance
@@ -53,7 +66,16 @@ class VisualisationController(QObject):
     # Public API (to be called from MainWindow / other controllers)
     # ---------------------------------------------------------------------
     def set_html_files(self, paths: Sequence[str]):
-        """Register the list of generated html files, refresh selector, and default to #0."""
+        """
+        Function:
+          Register available HTML visualisation files and display the first one.
+
+        Arguments:
+          paths (Sequence[str]): List of file paths to HTML visualisations.
+
+        Example:
+          >>> controller.set_html_files(["plot1.html", "plot2.html"])
+        """
         self.html_files = list(paths)
         # Refresh selector if bound
         if self._selector:
@@ -62,7 +84,16 @@ class VisualisationController(QObject):
             self.display_html(0)
 
     def display_html(self, index: int):
-        """Embed the *index*-th html into the QTextEdit panel."""
+        """
+        Function:
+          Display the specified HTML file within the QTextEdit area.
+
+        Arguments:
+          index (int): Index of the file to embed from the html_files list.
+
+        Example:
+          >>> controller.display_html(0)
+        """
         if not isinstance(index, int) or not (0 <= index < len(self.html_files)):
             return
         file_path = self.html_files[index]
@@ -70,7 +101,13 @@ class VisualisationController(QObject):
         self._embed_html(file_path)
 
     def open_current_external(self):
-        """Open the currently displayed html in the system web browser."""
+        """
+        Function:
+          Open the currently displayed HTML in the system’s default web browser.
+
+        Example:
+          >>> controller.open_current_external()
+        """
         if self.current_index is None:
             return
         path = self.html_files[self.current_index]
@@ -102,11 +139,29 @@ class VisualisationController(QObject):
     # Helpers for wiring additional UI elements
     # ------------------------------------------------------------------
     def bind_open_button(self, button: QPushButton):
-        """Wire an *Open* button to open the current html externally."""
+        """
+        Function:
+          Connect an *Open* button to open the current visualisation externally.
+
+        Arguments:
+          button (QPushButton): The button to connect.
+
+        Example:
+          >>> controller.bind_open_button(ui.openButton)
+        """
         button.clicked.connect(self.open_current_external)
 
     def bind_selector(self, combo: QComboBox):
-        """Wire a selector combo to this controller and populate on every update."""
+        """
+        Function:
+          Bind a QComboBox selector to manage and display HTML visualisations.
+
+        Arguments:
+          combo (QComboBox): The combo box used as selector.
+
+        Example:
+          >>> controller.bind_selector(ui.comboBox)
+        """
         self._selector = combo
 
         def safe_display():
@@ -118,7 +173,10 @@ class VisualisationController(QObject):
         self._refresh_selector()
 
     def _refresh_selector(self):
-        """Helper to (re)fill the bound QComboBox with current html_files."""
+        """
+        Function:
+          Populate the selector combo box with available HTML files.
+        """
         if not self._selector:
             return
         self._selector.clear()
@@ -129,13 +187,33 @@ class VisualisationController(QObject):
     # Internal helpers
     # ------------------------------------------------------------------
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:
-        """Catch double-clicks to open external view."""
+        """
+        Function:
+          Handle double-click events to open the visualisation externally.
+
+        Arguments:
+          obj (QObject): The source object.
+          event (QEvent): The event being filtered.
+
+        Returns:
+          bool: True if handled, False otherwise.
+        """
         if event.type() == QEvent.MouseButtonDblClick:
             self.open_current_external()
             return True
         return super().eventFilter(obj, event)
 
     def _embed_html(self, file_path: str):
+        """
+        Function:
+          Embed an HTML file inside the QTextEdit container using QWebEngineView.
+
+        Arguments:
+          file_path (str): Local path to the HTML file.
+
+        Example:
+          >>> controller._embed_html("visual.html")
+        """
         container: QTextEdit = self.ui.visualisationTextEdit
         # Clean previous webviews
         for child in container.findChildren(QWebEngineView):
@@ -160,15 +238,30 @@ class VisualisationController(QObject):
     # Optional configuration
     # ------------------------------------------------------------------
     def set_external_base_url(self, url: str):
-        """Set a base HTTP URL; when provided external open uses this instead of file:// paths."""
+        """
+        Function:
+          Define a base HTTP URL for opening HTML files externally via web links.
+
+        Arguments:
+          url (str): The base URL (must end with '/').
+
+        Example:
+          >>> controller.set_external_base_url("http://localhost:8000/")
+        """
         if not url.endswith('/'):
             url += '/'
         self.external_base_url = url
 
     def build_from_execution(self):
         """
-        let model.execution batch generate .html from .pos,
-        then merge the generated html list with the existing html files and pass it to the existing set_html_files() to display.
+        Function:
+          Generate and load visualisation HTMLs from the execution model.
+
+        Raises:
+          Exception: If generation or file merging fails.
+
+        Example:
+          >>> controller.build_from_execution()
         """
         try:
             exec_obj = getattr(self.parent, "execution", None)
@@ -192,6 +285,16 @@ class VisualisationController(QObject):
             QMessageBox.critical(self.ui, "Plot Error", str(e))
     
     def _find_existing_html_files(self):
+        """
+        Function:
+          Locate and return paths of existing visualisation HTML files.
+
+        Returns:
+          list[str]: List of existing HTML file paths.
+
+        Example:
+          >>> controller._find_existing_html_files()
+        """
         existing_files = []
 
         default_visual_dir = DEFAULT_OUT_DIR
@@ -203,3 +306,4 @@ class VisualisationController(QObject):
             pass
             
         return existing_files
+
