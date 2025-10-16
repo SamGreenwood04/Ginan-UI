@@ -16,11 +16,14 @@ NOTE:  UI widgets for selecting visualisation (e.g. a ComboBox or QListWidget)
 from __future__ import annotations
 
 import os
+import platform
+import subprocess
+import sys
 from pathlib import Path
 from typing import List, Sequence, Optional
 from PySide6.QtCore import QRect, QUrl, QObject, QEvent
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QTextEdit, QPushButton, QComboBox
+from PySide6.QtWidgets import QTextEdit, QPushButton, QComboBox, QApplication
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
 HERE = Path(__file__).resolve()
@@ -31,6 +34,10 @@ class VisualisationController(QObject):
     """Manage visualisation panel interactions."""
 
     def __init__(self, ui, parent_window):
+        """
+        :param ui:
+        :param parent_window:
+        """
         super().__init__(parent_window)
         self.ui = ui  # Ui_MainWindow instance
         self.parent = parent_window
@@ -67,17 +74,29 @@ class VisualisationController(QObject):
         if self.current_index is None:
             return
         path = self.html_files[self.current_index]
-        if self.external_base_url:
-            import pathlib
-            try:
-                project_root = pathlib.Path(__file__).resolve().parents[2]
-                rel_path = pathlib.Path(path).resolve().relative_to(project_root)
-                url = self.external_base_url + str(rel_path).replace(os.sep, '/')
-                QDesktopServices.openUrl(QUrl(url))
-                return
-            except Exception:
-                pass
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        try:
+            url = QUrl.fromLocalFile(Path(path).resolve())
+
+            # Open the file with the appropriate method for the operating system
+            if platform.system() == "Windows":
+                # sys._MEIPASS and some dll file need to be changed
+                QDesktopServices.openUrl(url)
+
+            elif platform.system() == "Darwin":
+                # sys._MEIPASS but might also work without any changes
+                QDesktopServices.openUrl(url)
+
+            else:
+                # When compiled with pyinstaller, LD_LIBRARY_PATH is modified which prevents external app opening
+                original = os.environ.get("LD_LIBRARY_PATH_ORIG")
+                current = os.environ.get("LD_LIBRARY_PATH")
+                if original:
+                    os.environ["LD_LIBRARY_PATH"] = original  # Restore original value
+                QDesktopServices.openUrl(url)
+                if original:
+                    os.environ["LD_LIBRARY_PATH"] = current
+        except Exception as e:
+            print(f"Error occured trying to open in browser: {e}")
 
     # ------------------------------------------------------------------
     # Helpers for wiring additional UI elements
@@ -184,9 +203,3 @@ class VisualisationController(QObject):
             pass
             
         return existing_files
-
-
-    # # display pos plot
-    # def show_pos_plot(self, pos_file):
-    #     html_path = run_plot_pos(pos_file, "app/resources/pos_plot.html")
-    #     self._embed_html(html_path)

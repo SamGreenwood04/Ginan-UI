@@ -21,7 +21,7 @@ test_visualisation = False
 
 
 def setup_main_window():
-    compile_ui()  # Always recompile .ui files during development
+    # compile_ui()  # Always recompile .ui files during development
     from app.views.main_window_ui import Ui_MainWindow
     return Ui_MainWindow()
 

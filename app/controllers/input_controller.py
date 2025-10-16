@@ -1030,20 +1030,25 @@ class InputController(QObject):
         
         try:
             abs_path = os.path.abspath(file_path)
-            
+
             # Open the file with the appropriate method for the operating system
             if platform.system() == "Windows":
                 os.startfile(abs_path)
-                print("Opened with default Windows application")
-                
-            elif platform.system() == "Darwin":  # macOS
+                return
+
+            if platform.system() == "Darwin":  # macOS
                 subprocess.run(["open", abs_path])
-                print("Opened with default macOS application")
                 
             else:  # Linux and other Unix-like systems
-                subprocess.run(["xdg-open", abs_path])
-                print("Opened with default Linux application")
-                
+                # When compiled with pyinstaller, LD_LIBRARY_PATH is modified which prevents external app opening
+                env = os.environ.copy()
+                original = env.get("LD_LIBRARY_PATH_ORIG")
+                if original:
+                    env["LD_LIBRARY_PATH"] = original # Restore original value
+                else:
+                    env.pop("LD_LIBRARY_PATH", None) # Clear the value to use sys defaults
+                subprocess.run(["xdg-open", abs_path], env=env)
+
         except Exception as e:
             error_message = f"Cannot open config file:\n{file_path}\n\nError: {str(e)}"
             print(f"Error: {error_message}")
