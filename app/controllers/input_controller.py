@@ -1,5 +1,16 @@
 # app/controllers/input_controller.py
+"""
+UI input flow controller for the Ginan-UI.
 
+Arguments:
+  None
+
+Returns:
+  None
+
+Example (Optional):
+  >>> # See InputController for UI interactions.
+"""
 from __future__ import annotations
 
 import os
@@ -41,25 +52,36 @@ from app.utils.workers import PPPWorker
 
 class InputController(QObject):
     """
-    Front-end controller
+    UI controller class InputController.
 
-    Owns all UI input flows:
-        - Select RNX file and Output directory
-        - Extract RINEX metadata and apply to UI
-        - Populate / handle config widgets (Mode, Constellations, etc.)
-        - Open small dialogs for selecting some values
-        - Show config file and run PEA processing
+    Arguments:
+      None
 
-    Emits:
-        ready(rnx_path: str, output_path: str)
+    Returns:
+      None
 
-        when both RNX and output dir are set.
+    Example (Optional):
+      >>> # InputController(ui, parent_window, execution)
     """
 
     ready = Signal(str, str) # rnx_path, output_path
     pea_ready = Signal() # emitted when PEA processing should start
 
     def __init__(self, ui, parent_window, execution: Execution):
+        """
+        UI handler: init.
+
+        Arguments:
+          ui (Any): Main window UI instance (generated from Qt .ui).
+          parent_window (Any): Parent widget/window to anchor dialogs.
+          execution (Execution): Backend execution bridge used to read/apply UI config.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl = InputController(ui, main_window, execution)
+        """
         super().__init__()
         self.ui = ui
         self.parent = parent_window
@@ -123,7 +145,18 @@ class InputController(QObject):
         self.setup_tooltips()
 
     def setup_tooltips(self):
-        """Add helpful tooltips to UI elements"""
+        """
+        UI handler: setup tooltips and visual style for key controls.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.setup_tooltips()
+        """
 
         # Consistent tooltip style for all elements
         tooltip_style = """
@@ -252,14 +285,35 @@ class InputController(QObject):
 
 
     def _open_cddis_credentials_dialog(self):
-        """ Open the CDDIS Credential Input Dialog Box """
+        """
+        UI handler: open the CDDIS credentials dialog for Earthdata login.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._open_cddis_credentials_dialog()
+        """
         dialog = CredentialsDialog(self.parent)
         dialog.exec()
 
     #region File Selection + Metadata Extraction + PPP product selection
     def load_rnx_file(self) -> ExtractedInputs | None:
-        """Pick an RNX file, extract metadata, apply to UI, and enable next steps."""
+        """
+        UI handler: choose a RINEX file, extract metadata, update UI, and start PPP products query.
 
+        Arguments:
+          None
+
+        Returns:
+          ExtractedInputs | None: Extracted inputs dataclass on success; None if user cancels or extraction fails.
+
+        Example (Optional):
+          >>> # result = ctrl.load_rnx_file()
+        """
         path = self._select_rnx_file(self.parent)
         if not path:
             return None
@@ -354,6 +408,18 @@ class InputController(QObject):
         return result
 
     def verify_antenna_type(self, result: List[str]):
+        """
+        UI handler: verify that the RINEX antenna_type exists in the selected ANTEX (.atx) file.
+
+        Arguments:
+          result (list[str] | dict): Parsed RINEX metadata containing 'antenna_type'.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.verify_antenna_type(result_dict)
+        """
         # Verify antenna_type is present within the .atx file
         # Return warning if not
         atx_path = self.get_best_atx_path()
@@ -396,6 +462,18 @@ class InputController(QObject):
         return
 
     def get_best_atx_path(self):
+        """
+        Select the best available ANTEX (.atx) file with a priority order.
+
+        Arguments:
+          None
+
+        Returns:
+          Path: Path to the chosen .atx file (e.g., igs20.atx if present).
+
+        Example (Optional):
+          >>> # p = ctrl.get_best_atx_path()
+        """
         # Find all .atx files present and prioritise the newest ones
         # Return filepath string to best .atx file
         atx_files = list(INPUT_PRODUCTS_PATH.glob("*.atx"))
@@ -422,7 +500,16 @@ class InputController(QObject):
 
     def _update_constellations_multiselect(self, constellation_str: str):
         """
-        Populate the multi-select combo for constellations using checkboxes.
+        Populate and mirror a multi-select constellation combo with checkboxes.
+
+        Arguments:
+          constellation_str (str): Comma-separated constellations (e.g., "GPS, GAL, GLO").
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._update_constellations_multiselect("GPS, GAL")
         """
         from PySide6.QtGui import QStandardItemModel, QStandardItem
 
@@ -478,6 +565,19 @@ class InputController(QObject):
         self.ui.constellationsValue.setText(", ".join(constellations))
 
     def _on_cddis_ready(self, data: pd.DataFrame, log_messages: bool=True):
+        """
+        UI handler: receive PPP products DataFrame from worker and populate provider/project/series combos.
+
+        Arguments:
+          data (pandas.DataFrame): Products table filtered for the selected time window.
+          log_messages (bool): Whether to append status lines to the terminal log.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._on_cddis_ready(df, True)
+        """
         self.products_df = data
 
         if data.empty:
@@ -512,11 +612,35 @@ class InputController(QObject):
             self.ui.terminalTextEdit.append(f"✅ CDDIS archive scan complete. Found PPP product providers: {', '.join(self.valid_analysis_centers)}")
 
     def _on_cddis_error(self, msg):
+        """
+        UI handler: report CDDIS worker error to the UI.
+
+        Arguments:
+          msg (str): Error message.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._on_cddis_error("network timeout")
+        """
         self.ui.terminalTextEdit.append(f"Error loading CDDIS data: {msg}")
         self.ui.PPP_provider.clear()
         self.ui.PPP_provider.addItem("None")
 
     def _on_ppp_provider_changed(self, provider_name: str):
+        """
+        UI handler: when PPP provider changes, refresh project and series options.
+
+        Arguments:
+          provider_name (str): Selected analysis center/provider name.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._on_ppp_provider_changed("COD")
+        """
         if not provider_name or provider_name.strip() == "":
             print("[Warning] No PPP provider selected — isgnoring update.")
             return
@@ -554,6 +678,18 @@ class InputController(QObject):
             self.ui.PPP_project.addItem("None")
 
     def _on_ppp_series_changed(self, selected_series: str):
+        """
+        UI handler: when PPP series changes, filter valid projects.
+
+        Arguments:
+          selected_series (str): Series code, e.g., 'ULT', 'RAP', 'FIN'.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._on_ppp_series_changed("FIN")
+        """
         if not hasattr(self, "_valid_project_series_df"):
             return
 
@@ -570,6 +706,18 @@ class InputController(QObject):
         print(f"[UI] Filtered PPP_project for series '{selected_series}': {valid_projects}")
         
     def _on_ppp_project_changed(self, selected_project: str):
+        """
+        UI handler: when PPP project changes, filter valid series.
+
+        Arguments:
+          selected_project (str): Project name.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._on_ppp_project_changed("MGEX")
+        """
         if not hasattr(self, "_valid_project_series_df"):
             return
 
@@ -586,6 +734,18 @@ class InputController(QObject):
         print(f"[UI] Filtered PPP_series for project '{selected_project}': {valid_series}")
 
     def load_output_dir(self):
+        """
+        UI handler: choose the output directory and (if RNX is set) emit ready.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.load_output_dir()
+        """
         """Pick an output directory; if RNX is also set, emit ready."""
         path = self._select_output_dir(self.parent)
         if not path:
@@ -612,7 +772,18 @@ class InputController(QObject):
             self.ready.emit(str(self.rnx_file), str(self.output_dir))
 
     def try_enable_process_button(self):
-        """Public helper so other components can enable the Process button without knowing UI internals."""
+        """
+        UI handler: enable the Process button when RNX, output path, and metadata are ready.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.try_enable_process_button()
+        """
         if not self.parent.metadata_downloaded:
             return
         if not self.output_dir:
@@ -628,7 +799,21 @@ class InputController(QObject):
     #region Multi-Selectors Assigning (A.K.A. Combo Plumbing)
 
     def _on_select(self, combo: QComboBox, label, title: str, index: int):
-        """Mirror combo selection to label and reset combo's placeholder text."""
+        """
+        UI handler: mirror a single-select combo choice to a label and reset placeholder.
+
+        Arguments:
+          combo (QComboBox): Source combo box.
+          label (QLabel): Target label to mirror text.
+          title (str): Placeholder title to reset in the combo.
+          index (int): Selected index.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._on_select(combo, label, "Select one", 0)
+        """
         value = combo.itemText(index)
         label.setText(value)
 
@@ -637,8 +822,17 @@ class InputController(QObject):
 
     def _bind_combo(self, combo: QComboBox, items_func: Callable[[], List[str]]):
         """
-        Populate a single-choice QComboBox each time it opens.
-        Keeps the left combo visually clean while moving the chosen value to the right label.
+        Bind a single-choice combo to dynamically populate items on open and keep the UI clean.
+
+        Arguments:
+          combo (QComboBox): Target combo box to bind.
+          items_func (Callable[[], list[str]]): Function returning the items list.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._bind_combo(self.ui.Mode, ctrl._get_mode_items)
         """
         combo._old_showPopup = combo.showPopup
 
@@ -661,8 +855,19 @@ class InputController(QObject):
             placeholder: str,
     ):
         """
-        On open, replace the combo's model with checkbox items and mirror all checked items
-        as comma-separated text to mirror_label.
+        Bind a multi-select combo using checkable items and mirror checked labels as comma-separated text.
+
+        Arguments:
+          combo (QComboBox): Target combo box.
+          items_func (Callable[[], list[str]]): Function returning the items list.
+          mirror_label (QLabel): Label where checked values are mirrored.
+          placeholder (str): Placeholder text when no item is checked.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._bind_multiselect_combo(self.ui.Constellations_2, get_items, self.ui.constellationsValue, "Select one or more")
         """
         combo.setEditable(True)
         combo.lineEdit().setReadOnly(True)
@@ -703,7 +908,18 @@ class InputController(QObject):
     # Receiver / Antenna free text popups
     # ==========================================================
     def _enable_free_text_for_receiver_and_antenna(self):
-        """Allow entering custom Receiver/Antenna types via popup prompt."""
+        """
+        Allow users to enter custom receiver/antenna types via popup, mirroring to UI.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._enable_free_text_for_receiver_and_antenna()
+        """
         self.ui.Receiver_type.setEditable(True)
         self.ui.Receiver_type.lineEdit().setReadOnly(True)
         self.ui.Antenna_type.setEditable(True)
@@ -748,6 +964,18 @@ class InputController(QObject):
     # Antenna offset popup
     # ==========================================================
     def _open_antenna_offset_dialog(self):
+        """
+        UI handler: open antenna offset dialog (E, N, U) with high-precision spin boxes.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._open_antenna_offset_dialog()
+        """
         dlg = QDialog(self.ui.antennaOffsetButton)
         dlg.setWindowTitle("Antenna Offset")
 
@@ -809,6 +1037,21 @@ class InputController(QObject):
         dlg.exec()
 
     def _set_antenna_offset(self, sb_e, sb_n, sb_u, dlg: QDialog):
+        """
+        UI handler: apply antenna offset values back to UI.
+
+        Arguments:
+          sb_e (QDoubleSpinBox): East (E) spin box.
+          sb_n (QDoubleSpinBox): North (N) spin box.
+          sb_u (QDoubleSpinBox): Up (U) spin box.
+          dlg (QDialog): Dialog to accept/close.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._set_antenna_offset(sb_e, sb_n, sb_u, dlg)
+        """
         e, n, u = sb_e.value(), sb_n.value(), sb_u.value()
         text = f"{e}, {n}, {u}"
         self.ui.antennaOffsetButton.setText(text)
@@ -820,6 +1063,18 @@ class InputController(QObject):
     # Time window popup
     # ==========================================================
     def _open_time_window_dialog(self):
+        """
+        UI handler: open dialog to adjust observation start/end times.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._open_time_window_dialog()
+        """
         dlg = QDialog(self.ui.timeWindowValue)
         dlg.setWindowTitle("Select start / end time")
 
@@ -861,6 +1116,20 @@ class InputController(QObject):
         dlg.exec()
 
     def _set_time_window(self, start_edit, end_edit, dlg: QDialog):
+        """
+        UI handler: validate and set selected time window into UI.
+
+        Arguments:
+          start_edit (QDateTimeEdit): Start time widget.
+          end_edit (QDateTimeEdit): End time widget.
+          dlg (QDialog): Dialog to accept/close.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._set_time_window(start_edit, end_edit, dlg)
+        """
         if end_edit.dateTime() < start_edit.dateTime():
             QMessageBox.warning(dlg, "Time error",
                                 "End time cannot be earlier than start time.\nPlease select again.")
@@ -877,6 +1146,18 @@ class InputController(QObject):
     # Data interval popup
     # ==========================================================
     def _open_data_interval_dialog(self):
+        """
+        UI handler: prompt for data interval (seconds) and update UI.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl._open_data_interval_dialog()
+        """
         # Extract current value from button text ("30 s" → 30)
         current_text = self.ui.dataIntervalButton.text().replace(" s", "").strip()
         try:
@@ -912,10 +1193,10 @@ class InputController(QObject):
                         'subsetting1': 'subvalue1'
                     }
                 }
-        
+
         Returns:
             str: generated YAML file path, should return the path in the format of /resources/Yaml/xxxx.yaml
-        
+
         TODO: backend please implement the following functions:
         1. receive config_parameters parameter
         2. convert the parameters to YAML format
@@ -929,6 +1210,18 @@ class InputController(QObject):
         return self.default_config_path
 
     def extract_ui_values(self, rnx_path):
+        """
+        Extract current UI values, parse/normalize them, and return as dataclass.
+
+        Arguments:
+          rnx_path (str): Selected RINEX observation file path.
+
+        Returns:
+          ExtractedInputs: Dataclass containing parsed fields and raw strings.
+
+        Example (Optional):
+          >>> # inputs = ctrl.extract_ui_values("/path/to/file.rnx")
+        """
         # Extract user input from the UI and assign it to class variables.
         mode_raw           = self.ui.Mode.currentText() if self.ui.Mode.currentText() != "Select one" else "Static"
         
@@ -994,9 +1287,16 @@ class InputController(QObject):
 
     def on_show_config(self):
         """
-        Show config file
-        Open the fixed path YAML config file: /resources/Yaml/default_config.yaml
-        No longer need to manually select files
+        UI handler: reload config, apply UI values, write changes, then open the YAML.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.on_show_config()
         """
         print("opening config file...")
         print("[DEBUG] on_show_config: rnx_file =", self.rnx_file)
@@ -1020,10 +1320,16 @@ class InputController(QObject):
 
     def on_open_config_in_editor(self, file_path):
         """
-        Open the config file in an external editor
-        
-        Args:
-            file_path (str): the complete path of the YAML config file
+        Open the config YAML file in the OS default editor/viewer.
+
+        Arguments:
+          file_path (str): Absolute or relative path to the YAML file.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.on_open_config_in_editor(GENERATED_YAML)
         """
         import subprocess
         import platform
@@ -1054,8 +1360,17 @@ class InputController(QObject):
             )
 
     def on_run_pea(self):
-        """Triggered when 'Process' is clicked: validates input, parses time window,
-        applies config, then signals MainWindow to continue with PPP downloads + PEA execution.
+        """
+        UI handler: validate time window and config, apply UI, then emit pea_ready.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # ctrl.on_run_pea()
         """
         raw = self.ui.timeWindowValue.text()
         print(f"[UI] Time window raw input: {raw}")
@@ -1110,7 +1425,19 @@ class InputController(QObject):
 
     @staticmethod
     def _set_combobox_by_value(combo: QComboBox, value: str):
-        """Find 'value' in a combo and set it if present."""
+        """
+        Helper: find a value in a combo and set current index if present.
+
+        Arguments:
+          combo (QComboBox): Target combo box.
+          value (str): Text to search.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # InputController._set_combobox_by_value(self.ui.PPP_series, "FIN")
+        """
         if value is None:
             return
         idx = combo.findText(value)
@@ -1119,7 +1446,18 @@ class InputController(QObject):
 
     @staticmethod
     def _select_rnx_file(parent) -> str:
-        """Select RINEX file using file dialog"""
+        """
+        Open a file dialog to select a RINEX observation file.
+
+        Arguments:
+          parent (Any): Parent widget.
+
+        Returns:
+          str: Selected file path or empty string.
+
+        Example (Optional):
+          >>> # p = InputController._select_rnx_file(parent)
+        """
         path, _ = QFileDialog.getOpenFileName(
             parent, 
             "Select RINEX Observation File", 
@@ -1130,12 +1468,36 @@ class InputController(QObject):
 
     @staticmethod
     def _select_output_dir(parent) -> str:
-        """Select output directory using file dialog"""
+        """
+        Open a directory dialog to select the output folder.
+
+        Arguments:
+          parent (Any): Parent widget.
+
+        Returns:
+          str: Selected directory path or empty string.
+
+        Example (Optional):
+          >>> # d = InputController._select_output_dir(parent)
+        """
         path = QFileDialog.getExistingDirectory(parent, "Select Output Directory")
         return path or ""
 
     @staticmethod
     def determine_mode_value(mode_raw: str) -> int:
+        """
+        Map a mode label to its numeric value used by backend.
+
+        Arguments:
+          mode_raw (str): One of 'Static', 'Kinematic', 'Dynamic'.
+
+        Returns:
+          int: 0 for Static, 30 for Kinematic, 100 for Dynamic.
+
+        Example (Optional):
+          >>> determine_mode_value("Static")
+          0
+        """
         if mode_raw == "Static":
             return 0
         elif mode_raw == "Kinematic":
@@ -1148,9 +1510,17 @@ class InputController(QObject):
     @staticmethod
     def extract_marker_name(rnx_path: str) -> str:
         """
-        Extracts the 4-char site code from the RNX file name.
-        Falls back to "TEST" if one cannot be found.
-        E.g.: ALIC00AUS_R_20250190000_01D_30S_MO.rnx.gz -> ALBY
+        Extract a 4-char site code (marker) from a RINEX filename.
+
+        Arguments:
+          rnx_path (str): RNX file path. If empty/invalid, returns 'TEST'.
+
+        Returns:
+          str: Upper-cased 4-char marker or 'TEST' when not found.
+
+        Example (Optional):
+          >>> extract_marker_name("ALIC00AUS_R_20250190000_01D_30S_MO.rnx.gz")
+          'ALIC'
         """
         if not rnx_path:
             return "TEST"
@@ -1160,7 +1530,19 @@ class InputController(QObject):
 
     @staticmethod
     def parse_time_window(time_window_raw: str):
-        """Convert 'start_time to end_time' into (start_epoch, end_epoch)."""
+        """
+        Convert 'start_time to end_time' into (start_epoch, end_epoch) strings.
+
+        Arguments:
+          time_window_raw (str): e.g., 'YYYY-MM-DD_HH:MM:SS to YYYY-MM-DD_HH:MM:SS'.
+
+        Returns:
+          tuple[str, str]: (start_epoch, end_epoch) with underscores preserved for UI.
+
+        Example (Optional):
+          >>> parse_time_window("2025-01-01_00:00:00 to 2025-01-02_00:00:00")
+          ('2025-01-01 00:00:00', '2025-01-02 00:00:00')
+        """
         try:
             start, end = map(str.strip, time_window_raw.split("to"))
 
@@ -1173,7 +1555,19 @@ class InputController(QObject):
 
     @staticmethod
     def parse_antenna_offset(antenna_offset_raw: str):
-        """Convert 'e, n, u' into [e, n, u] floats."""
+        """
+        Convert 'e, n, u' string into [e, n, u] floats.
+
+        Arguments:
+          antenna_offset_raw (str): e.g., '0.0, 0.0, 1.234'.
+
+        Returns:
+          list[float]: [e, n, u] in metres.
+
+        Example (Optional):
+          >>> parse_antenna_offset("0.1, -0.2, 1.0")
+          [0.1, -0.2, 1.0]
+        """
         try:
             e, n, u = map(str.strip, antenna_offset_raw.split(","))
             return [float(e), float(n), float(u)]
@@ -1182,6 +1576,18 @@ class InputController(QObject):
 
     @dataclass
     class ExtractedInputs:
+        """
+        Dataclass container for parsed UI values and raw strings.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # InputController.ExtractedInputs(marker_name="ABCD", start_epoch="...", end_epoch="...", ...)
+        """
         # Parsed / derived values
         marker_name: str
         start_epoch: str
@@ -1208,27 +1614,101 @@ class InputController(QObject):
 
     @staticmethod
     def _get_mode_items() -> List[str]:
+        """
+         Provide available processing modes for the UI combo.
+
+         Arguments:
+           None
+
+         Returns:
+           list[str]: ['Static', 'Kinematic', 'Dynamic']
+
+         Example (Optional):
+           >>> InputController._get_mode_items()
+           ['Static', 'Kinematic', 'Dynamic']
+         """
         return ["Static", "Kinematic", "Dynamic"]
 
     @staticmethod
     def _get_constellations_items() -> List[str]:
+        """
+        Provide available GNSS constellations for the UI combo.
+
+        Arguments:
+          None
+
+        Returns:
+          list[str]: ['GPS', 'GAL', 'GLO', 'BDS', 'QZS']
+
+        Example (Optional):
+          >>> InputController._get_constellations_items()
+          ['GPS', 'GAL', 'GLO', 'BDS', 'QZS']
+        """
         return ["GPS", "GAL", "GLO", "BDS", "QZS"]
 
     def _get_ppp_provider_items(self) -> List[str]:
+        """
+        Provide available PPP providers from the cached products DataFrame.
+
+        Arguments:
+          None
+
+        Returns:
+          list[str]: Provider names; empty when products list is not yet available.
+
+        Example (Optional):
+          >>> ctrl._get_ppp_provider_items()
+        """
         if hasattr(self, "valid_analysis_centers") and self.valid_analysis_centers:
             return self.valid_analysis_centers
         return []
 
     @staticmethod
     def _get_ppp_series_items() -> List[str]:
+        """
+         Provide available PPP series codes for the UI combo.
+
+         Arguments:
+           None
+
+         Returns:
+           list[str]: ['ULT', 'RAP', 'FIN']
+
+         Example (Optional):
+           >>> InputController._get_ppp_series_items()
+           ['ULT', 'RAP', 'FIN']
+         """
         return ["ULT", "RAP", "FIN"]
 
     #endregion
 
 
 class CredentialsDialog(QDialog):
-    """ Credentials, pop-up window """
+    """
+    UI controller class CredentialsDialog.
+
+    Arguments:
+      None
+
+    Returns:
+      None
+
+    Example (Optional):
+      >>> # dlg = CredentialsDialog(parent)
+    """
     def __init__(self, parent=None):
+        """
+        UI handler: initialize credential input widgets and layout.
+
+        Arguments:
+          parent (Any): Optional parent widget.
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # dlg = CredentialsDialog(self)
+        """
         super().__init__(parent)
         self.setWindowTitle("CDDIS Credentials")
 
@@ -1253,6 +1733,18 @@ class CredentialsDialog(QDialog):
         self.setLayout(layout)
 
     def save_credentials(self):
+        """
+        UI handler: validate username/password, save to netrc, and close dialog.
+
+        Arguments:
+          None
+
+        Returns:
+          None
+
+        Example (Optional):
+          >>> # dlg.save_credentials()
+        """
         username = self.username_input.text().strip()
         password = self.password_input.text().strip()
 
@@ -1275,6 +1767,18 @@ class CredentialsDialog(QDialog):
 
 # ===== Added: minimal unified stop entry for InputController background worker =====
 def _safe_call_stop(obj):
+    """
+    Safely call .stop() on an object if present, ignoring exceptions.
+
+    Arguments:
+      obj (Any): Object that may implement stop().
+
+    Returns:
+      None
+
+    Example (Optional):
+      >>> # _safe_call_stop(worker)
+    """
     try:
         if obj is not None and hasattr(obj, "stop"):
             obj.stop()
@@ -1283,8 +1787,16 @@ def _safe_call_stop(obj):
 
 def stop_all(self):
     """
-    Best-effort stop for the metadata PPPWorker started by load_rnx_file().
-    Does nothing if the worker/thread are not present.
+    Best-effort stop for the metadata PPPWorker started by the controller.
+
+    Arguments:
+      self (InputController): Controller instance owning the worker/thread.
+
+    Returns:
+      None
+
+    Example (Optional):
+      >>> # stop_all(ctrl)
     """
     try:
         if hasattr(self, "worker"):

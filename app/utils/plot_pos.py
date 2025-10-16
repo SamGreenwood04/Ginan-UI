@@ -8,6 +8,21 @@ import numpy as np
 import argparse
 
 def parse_pos_format(file_path):
+    """
+    Parse a .POS file into a pandas DataFrame.
+
+    Arguments:
+      file_path (str): Path to a .POS file with records following the expected format.
+
+    Returns:
+      pandas.DataFrame: Table with columns such as 'Time', 'Latitude', 'Longitude',
+      'Elevation', 'dN', 'dE', 'dU', 'sN', 'sE', 'sU', 'sElevation', 'Rne', 'Rnu', 'Reu', 'soln'.
+
+    Example (Optional):
+      >>> df = parse_pos_format("sample.POS")  # doctest: +SKIP
+      >>> isinstance(df, pd.DataFrame)  # doctest: +SKIP
+      True
+    """
     data = []
     try:
         with open(file_path, 'r') as file:
@@ -43,6 +58,18 @@ def parse_pos_format(file_path):
 
 # Function to parse the datetime with optional timezone
 def parse_datetime(datetime_str):
+    """
+    Parse an ISO-like datetime string with or without timezone into a naive datetime.
+
+    Arguments:
+      datetime_str (str): Datetime string, e.g., 'YYYY-MM-DDTHH:MM:SS' or 'YYYY-MM-DDTHH:MM:SS±HHMM'.
+
+    Returns:
+      datetime: Timezone-naive datetime object. If timezone was present, it is stripped.
+
+    Example (Optional):
+      >>> parse_datetime("2025-01-01T00:00:00")  # doctest: +SKIP
+    """
     # Attempt to parse datetime with and without timezone
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S"):
         try:
@@ -57,6 +84,15 @@ def parse_datetime(datetime_str):
     raise ValueError(f"datetime {datetime_str} does not match expected formats.")    
 
 def remove_weighted_mean(data):
+    """
+    Remove weighted mean from each component series in-place and return the DataFrame.
+
+    Arguments:
+      data (pandas.DataFrame): Data with components ('dN','dE','dU','Elevation') and their sigmas ('sN','sE','sU','sElevation').
+
+    Returns:
+      pandas.DataFrame: The same DataFrame with each component demeaned by its weighted mean.
+    """
     sigma_keys = {'dN': 'sN', 'dE': 'sE', 'dU': 'sU', 'Elevation': 'sElevation'}  # Assume sElevation exists
     for component in ['dN', 'dE', 'dU', 'Elevation']:
         sigma_key = sigma_keys[component]
@@ -66,6 +102,20 @@ def remove_weighted_mean(data):
     return data
 
 def apply_smoothing(data, horz_smoothing=None, vert_smoothing=None):
+    """
+    Apply LOWESS smoothing to horizontal and/or vertical components.
+
+    Arguments:
+      data (pandas.DataFrame): Input data with time column 'Time' and components.
+      horz_smoothing (float or None): Fraction for LOWESS on dN/dE (0..1), or None to skip.
+      vert_smoothing (float or None): Fraction for LOWESS on dU/Elevation (0..1), or None to skip.
+
+    Returns:
+      pandas.DataFrame: DataFrame with additional 'Smoothed_*' columns when smoothing is applied.
+
+    Example (Optional):
+      >>> apply_smoothing(df, horz_smoothing=0.1)  # doctest: +SKIP
+    """
     for component in ['dN', 'dE', 'dU', 'Elevation']:
         if horz_smoothing and (component == 'dN' or component == 'dE'):
             data[f'Smoothed_{component}'] = lowess(data[component], data['Time'], frac=horz_smoothing, return_sorted=False)
@@ -74,6 +124,19 @@ def apply_smoothing(data, horz_smoothing=None, vert_smoothing=None):
     return data
 
 def compute_statistics(data):
+    """
+    Compute weighted statistics and add helper series for plotting.
+
+    Arguments:
+      data (pandas.DataFrame): Data containing components and corresponding sigma columns.
+
+    Returns:
+      tuple[pandas.DataFrame, dict]: (data_with_helper_columns, stats_dict) where stats_dict maps
+      component -> {'weighted_mean', 'std_dev', 'rms'}.
+
+    Example (Optional):
+      >>> data, stats = compute_statistics(df)  # doctest: +SKIP
+    """
     stats = {}
     for component in ['dN', 'dE', 'dU', 'Elevation']:
         sigma_key = f's{component[-1].upper()}' if component != 'Elevation' else 'sElevation'
@@ -98,7 +161,21 @@ def compute_statistics(data):
     return data, stats
 
 def create_plots(all_data, input_files, component_stats, args):
-    """Create all the plots based on the data and arguments"""
+    """
+    Create interactive HTML plots for POS analysis (time-series, dN–dE scatter, and optional map/heatmap).
+
+    Arguments:
+      all_data (pandas.DataFrame): Parsed measurement table with columns such as 'Time', 'dN', 'dE', 'dU' or 'Elevation', and their sigmas.
+      input_files (list[str]): One or more .POS file paths used for titles and output naming.
+      component_stats (dict): Per-component statistics returned by compute_statistics().
+      args (object): Options namespace, supporting fields like colour_sigma, max_sigma, elevation, map, heatmap, save_prefix.
+
+    Returns:
+      None: Writes HTML files when args.save_prefix is provided; otherwise keeps figures in memory.
+
+    Example (Optional):
+      >>> # create_plots(df, ["site.POS"], stats, SimpleNamespace(colour_sigma=False, save_prefix="./out/fig"))  # doctest: +SKIP
+    """
     input_root = Path(input_files[0]).stem
     
     # Start plotting
@@ -427,7 +504,20 @@ def create_plots(all_data, input_files, component_stats, args):
             fig4.write_html(output_path)
 
 def run_plot_pos(file_path, output_html="pos_plot.html"):
-    """Legacy function for backward compatibility"""
+    """
+    Legacy wrapper kept for backward compatibility with older call sites.
+
+    Arguments:
+      file_path (str): Path to a single .POS file.
+      output_html (str): Target HTML file path (placeholder; current implementation returns it unchanged).
+
+    Returns:
+      str: The output_html string passed in.
+
+    Example (Optional):
+      >>> run_plot_pos("sample.POS", "pos_plot.html")
+      'pos_plot.html'
+    """
     df = parse_pos_format(file_path)
     # This function needs to be updated to work with the new structure
     # For now, just return the output path
@@ -439,27 +529,33 @@ def plot_pos_files(input_files, start_datetime=None, end_datetime=None,
                    heatmap=False, sigma_threshold=None, down_sample=None, 
                    save_prefix=None):
     """
-    Main function to plot POS files. This can be called from other modules.
-    
-    Args:
-        input_files: List of input file paths
-        start_datetime: Start datetime string (optional)
-        end_datetime: End datetime string (optional)
-        horz_smoothing: Horizontal smoothing fraction (optional)
-        vert_smoothing: Vertical smoothing fraction (optional)
-        colour_sigma: Whether to color by sigma (optional)
-        max_sigma: Maximum sigma for color scale (optional)
-        elevation: Whether to plot elevation instead of dU (optional)
-        demean: Whether to remove weighted mean (optional)
-        map_view: Whether to create map plot (optional)
-        heatmap: Whether to create heatmap (optional)
-        sigma_threshold: Tuple of (sE, sN, sU) thresholds (optional)
-        down_sample: Down-sampling interval in seconds (optional)
-        save_prefix: Prefix for saving HTML files (optional)
-    
-    Returns:
-        List of generated HTML file paths
-    """
+       Generate interactive plots from one or more POS files (time window, smoothing, filtering, and outputs).
+
+       Arguments:
+         input_files (list[str]): One or more input .POS file paths.
+         start_datetime (str or None): Start time (e.g., 'YYYY-MM-DDTHH:MM:SS' with optional timezone).
+         end_datetime (str or None): End time (same format as start_datetime).
+         horz_smoothing (float or None): LOWESS fraction for horizontal components (dN/dE).
+         vert_smoothing (float or None): LOWESS fraction for vertical component (dU or Elevation).
+         colour_sigma (bool): If True, color markers by sigma; otherwise show error bars.
+         max_sigma (float or None): Upper cap for sigma color scale when colour_sigma is True.
+         elevation (bool): If True, use 'Elevation' instead of 'dU' for vertical plotting.
+         demean (bool): If True, remove weighted mean from each series before plotting.
+         map_view (bool): If True, generate a geographic map (fig3).
+         heatmap (bool): If True, generate a 2D dE–dN density view (fig4).
+         sigma_threshold (tuple[float, float, float] or None): (sE, sN, sU) thresholds for filtering rows.
+         down_sample (int or None): Resampling interval in seconds for time-indexed thinning.
+         save_prefix (str or None): If provided, write HTML files next to this prefix.
+
+       Returns:
+         list[str]: Paths to generated HTML files when save_prefix is provided; empty list if save_prefix is None.
+
+       Example (Optional):
+         >>> files = ["./A.POS", "./B.POS"]  # doctest: +SKIP
+         >>> out = plot_pos_files(files, start_datetime="2025-01-01T00:00:00", colour_sigma=False, save_prefix="./out/fig")  # doctest: +SKIP
+         >>> isinstance(out, list)  # doctest: +SKIP
+         True
+       """
     class Args:
         def __init__(self):
             self.start_datetime = start_datetime

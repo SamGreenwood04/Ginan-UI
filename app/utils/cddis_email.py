@@ -1,4 +1,17 @@
 # app/utils/cddis_email.py
+"""
+Utilities for managing the EMAIL used by the CDDIS flow and for quick connectivity/auth checks.
+
+This module is used by the UI credential flow to:
+  • Read/Write the EMAIL value (env var first, then a local CDDIS.env file).
+  • Derive the email/username from `.netrc/_netrc` when the user only saved Earthdata credentials.
+  • Test connectivity to cddis.nasa.gov and verify Earthdata authentication via requests.
+
+Notes:
+  - This module does not present UI; it is called by UI dialogs/controllers.
+  - File locations are platform-aware and compatible with Windows/macOS/Linux.
+"""
+
 from __future__ import annotations
 import os
 import platform
@@ -16,8 +29,17 @@ EMAIL_KEY = "EMAIL"
 # ------------------------------
 def _pick_netrc() -> Path:
     """
-    Prefer using the path function provided in app.utils.cddis_credentials;
-    if unavailable, try the candidates; otherwise, fall back to platform defaults.
+    Select a `.netrc`-style credential file path to use.
+
+    Arguments:
+      None
+
+    Returns:
+      Path: Resolved path to the preferred credential file.
+
+    Example (Optional):
+      >>> isinstance(_pick_netrc(), Path)
+      True
     """
     try:
         from app.utils.cddis_credentials import netrc_path as _netrc_path  # type: ignore
@@ -28,7 +50,6 @@ def _pick_netrc() -> Path:
             return _netrc_path()
         except Exception:
             pass
-
     try:
         from app.utils.cddis_credentials import netrc_candidates as _netrc_candidates  # type: ignore
         cands = _netrc_candidates()
@@ -37,17 +58,26 @@ def _pick_netrc() -> Path:
                 return p
         return cands[0]
     except Exception:
-        # 平台默认
         if platform.system().lower().startswith("win"):
             return Path(os.environ.get("USERPROFILE", str(Path.home()))) / ".netrc"
         return Path.home() / ".netrc"
 
-
-# ------------------------------
-#  EMAIL read/write
-# ------------------------------
 def read_email() -> str | None:
-    """Read from the environment variable first, then from utils/CDDIS.env (supports EMAIL=xxx or EMAIL="xxx")。"""
+    """
+    Read the EMAIL used by CDDIS utilities.
+
+    Arguments:
+      None
+
+    Returns:
+      str | None: EMAIL value if found. Lookup order: env var EMAIL → CDDIS.env → None.
+
+    Example (Optional):
+      >>> os.environ.pop("EMAIL", None)
+      >>> _ = ENV_FILE.write_text('EMAIL="user@example.com"\\n', encoding="utf-8")
+      >>> read_email()
+      'user@example.com'
+    """
     v = os.environ.get(EMAIL_KEY, "").strip()
     if v:
         return v
@@ -61,22 +91,42 @@ def read_email() -> str | None:
                 return val.strip().strip('"').strip("'")
     return None
 
-
 def write_email(email: str) -> Path:
-    """Write utils/CDDIS.env and update the EMAIL environment variable at the same time."""
+    """
+    Persist the EMAIL value to `CDDIS.env` and update the process env.
+
+    Arguments:
+      email (str): Email address to store.
+
+    Returns:
+      Path: Path to the written CDDIS.env file.
+
+    Example (Optional):
+      >>> p = write_email("user@example.com")
+      >>> p.exists()
+      True
+      >>> read_email()
+      'user@example.com'
+    """
     ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     ENV_FILE.write_text(f'{EMAIL_KEY}="{email}"\n', encoding="utf-8")
     os.environ[EMAIL_KEY] = email
     return ENV_FILE
 
-
-# ------------------------------
-#  Read the username from .netrc (with the convention: username == email)
-# ------------------------------
 def get_username_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tuple[bool, str]:
     """
-    Read only the username from .netrc/_netrc (no env writes, no file output).
-    Return (ok, username_or_reason).
+    Read the username from `.netrc/_netrc`, assuming username equals EMAIL.
+
+    Arguments:
+      prefer_host (str): Primary host to query in netrc (fallback to cddis.nasa.gov).
+
+    Returns:
+      tuple[bool, str]: (True, username) if found; otherwise (False, reason).
+
+    Example (Optional):
+      >>> ok, val = get_username_from_netrc()  # doctest: +SKIP
+      >>> ok in (True, False)
+      True
     """
     p = _pick_netrc()
     if not p.exists():
@@ -90,10 +140,20 @@ def get_username_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tupl
     except Exception as e:
         return False, f"parse netrc failed: {e}"
 
-
 def ensure_email_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tuple[bool, str]:
     """
-    If EMAIL already exists, return it directly; otherwise, read the username from .netrc as EMAIL, write it to CDDIS.env, and return.
+    Ensure that EMAIL is available, deriving it from netrc if necessary.
+
+    Arguments:
+      prefer_host (str): Primary host to read username from in netrc.
+
+    Returns:
+      tuple[bool, str]: (True, email) if resolved; otherwise (False, reason).
+
+    Example (Optional):
+      >>> ok, email = ensure_email_from_netrc()  # doctest: +SKIP
+      >>> ok in (True, False)
+      True
     """
     existing = read_email()
     if existing:
@@ -105,12 +165,21 @@ def ensure_email_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tupl
     write_email(user)
     return True, user
 
-
-# ------------------------------
-#  Retrieve (username, password) from .netrc for authentication testing
-# ------------------------------
 def get_netrc_auth() -> tuple[str, str] | None:
-    """Retrieve (username, password) from .netrc/_netrc."""
+    """
+    Retrieve (username, password) from `.netrc/_netrc` for Earthdata auth.
+
+    Arguments:
+      None
+
+    Returns:
+      tuple[str, str] | None: (username, password) if found; otherwise None.
+
+    Example (Optional):
+      >>> creds = get_netrc_auth()  # doctest: +SKIP
+      >>> creds is None or isinstance(creds, tuple)
+      True
+    """
     p = _pick_netrc()
     if not p.exists():
         return None
@@ -121,32 +190,35 @@ def get_netrc_auth() -> tuple[str, str] | None:
             return (auth[0], auth[2])
     return None
 
-
-# ------------------------------
-#  Connectivity + authentication test (two-phase)
-# ------------------------------
 def test_cddis_connection(timeout: int = 15) -> tuple[bool, str]:
     """
-    Phase 1: Access robots.txt (network reachable)
-    Phase 2: Use requests.Session() with (user, pass) from .netrc to access a restricted directory (authentication valid)
+    Test CDDIS connectivity and Earthdata authentication in two phases.
+
+    Arguments:
+      timeout (int): Overall timeout in seconds for the restricted request phase.
+
+    Returns:
+      tuple[bool, str]: (True, 'AUTH OK, took X.XXX seconds') on success; otherwise (False, reason).
+
+    Example (Optional):
+      >>> ok, msg = test_cddis_connection()  # doctest: +SKIP
+      >>> ok in (True, False)
+      True
     """
-    # Phase 1: Lightweight connectivity
     print("Testing connectivity to cddis.nasa.gov...")
     start_time = time.perf_counter()
-    r = requests.get("https://cddis.nasa.gov/robots.txt",
-                     timeout=(5, timeout))
+    r = requests.get("https://cddis.nasa.gov/robots.txt", timeout=(5, timeout))
     if r.status_code != 200:
         return False, f"HTTP {r.status_code} on robots.txt"
     print(f"Connectivity OK. Took {time.perf_counter() - start_time:.3f} seconds\nTesting authentication using .netrc...")
 
-    # Phase 2: Restricted directory authentication
     start_time = time.perf_counter()
     creds = get_netrc_auth()
     if not creds:
         return False, "no usable credentials in .netrc"
     session = requests.Session()
     session.auth = creds
-    url = "https://cddis.nasa.gov/archive/00readme"  # Within the restricted directory
+    url = "https://cddis.nasa.gov/archive/00readme"
     resp = session.get(url, timeout=(5, timeout), allow_redirects=True)
     head = resp.text[:1200]
     if resp.status_code == 200 and "Earthdata Login" not in head:
