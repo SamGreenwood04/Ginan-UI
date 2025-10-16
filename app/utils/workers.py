@@ -30,7 +30,7 @@ class PeaExecutionWorker(QObject):
     def stop(self):
         try:
             self.log.emit("[PeaExecutionWorker] Stop requested — terminating PEA...")
-            # 推荐在 Execution 里实现 stop_all()，用于终止子进程
+            # recommended to implement stop_all() in Execution to terminate child processes
             if hasattr(self.execution, "stop_all"):
                 self.execution.stop_all()
             self.finished.emit("[PeaExecutionWorker] Stopped.")

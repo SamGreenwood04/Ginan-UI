@@ -164,7 +164,7 @@ class Execution:
         self.changes = False
 
     def execute_config(self):
-        # 每次跑之前清停标记
+        # clear stop flag before each run
         self.reset_stop_flag()
 
         if self.changes:
@@ -175,23 +175,23 @@ class Execution:
         workdir = str(Path(self.config_path).parent)
 
         try:
-            # 用进程组方式启动，保存句柄
+            # spawn process with process group
             p = self.spawn_process(command, cwd=workdir)
 
-            # 按行转发 stdout/stderr，期间可随时停止
+            # forward stdout/stderr line by line, can be stopped at any time
             assert p.stdout is not None and p.stderr is not None
             while True:
                 if self._stop_event.is_set():
-                    # UI 点了“停止”，这里直接退出循环，收尾由 stop_all() 负责
+                    # UI clicked "stop", exit loop, cleanup handled by stop_all()
                     break
 
                 line = p.stdout.readline()
                 if line:
                     print(line.rstrip())
                 else:
-                    # 没有新输出，检查是否已结束
+                    # no new output, check if process has ended
                     if p.poll() is not None:
-                        # 把剩余 stderr 打出来便于定位
+                        # print remaining stderr for debugging
                         rest_err = p.stderr.read() or ""
                         if rest_err:
                             print(rest_err.rstrip())
@@ -201,14 +201,14 @@ class Execution:
                             raise e
                         break
 
-                # 轻微休眠避免忙轮询
+                # slight sleep to avoid busy polling
                 time.sleep(0.01)
 
         finally:
-            # 执行结束后，清理掉已结束的句柄
+            # after execution, clean up finished processes
             self._procs = [proc for proc in self._procs if proc.poll() is None]
 
-        # 统一的进程启动：用独立进程组，便于一键 kill（macOS/Linux）
+        # unified process spawning: use independent process groups, for easy kill (macOS/Linux)
     def spawn_process(self, args, cwd=None, env=None) -> subprocess.Popen:
         p = subprocess.Popen(
             args,
@@ -217,16 +217,16 @@ class Execution:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=True,   # 关键：新会话=新进程组
+            start_new_session=True,   # critical: new session = new process group
         )
         self._procs.append(p)
         return p
 
-    # 一键停止：置停标记 + 结束所有子进程组
+    # one-click stop: set stop flag + terminate all child process groups
     def stop_all(self):
         self._stop_event.set()
 
-        # 先尝试优雅终止
+        # try graceful termination first
         for p in list(self._procs):
             try:
                 if p.poll() is None:
@@ -234,9 +234,9 @@ class Execution:
             except Exception:
                 pass
 
-        time.sleep(0.5)  # 给一点时间
+        time.sleep(0.5)  # give it a little time
 
-        # 仍未退出则强杀
+        # if still not exited, force kill
         for p in list(self._procs):
             try:
                 if p.poll() is None:
