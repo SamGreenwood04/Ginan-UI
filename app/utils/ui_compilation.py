@@ -3,8 +3,25 @@ from pathlib import Path
 
 
 def compile_ui():
+    """
+    Compile the Qt `.ui` file into a Python module and fix its resource import.
+
+    Converts `main_window.ui` into `main_window_ui.py` using `pyside6-uic`,
+    then updates the logo import line for correct resource loading.
+
+    Raises:
+      ImportError: If `pyside6-uic` is not found.
+
+    Example:
+      >>> compile_ui()
+      UI compiled successfully.
+    """
+
+    # File paths
     ui_file = Path(__file__).parent.parent / "views" / "main_window.ui"
     output_file = Path(__file__).parent.parent / "views" / "main_window_ui.py"
+
+    # Ensure compiler exists
     if shutil.which("pyside6-uic"):
         with open(output_file, 'w') as f:
             f.write("# This file is auto-generated. Do not edit.\n")
