@@ -31,8 +31,7 @@ DEFAULT_OUT_DIR = ROOT / "tests" / "resources" / "outputData" / "visual"
 
 class VisualisationController(QObject):
     """
-    Function:
-      Manage interactions and rendering inside the visualisation panel.
+    Manage interactions and rendering inside the visualisation panel.
 
     Arguments:
       ui (object): The main window UI object that exposes the visualisation widgets (e.g., `visualisationTextEdit`).
@@ -50,8 +49,7 @@ class VisualisationController(QObject):
     
     def __init__(self, ui, parent_window):
         """
-        Function:
-          Initialize controller state and install required event filters.
+        Initialize controller state and install required event filters.
 
         Arguments:
           ui: The main window UI instance.
@@ -79,8 +77,7 @@ class VisualisationController(QObject):
     # ---------------------------------------------------------------------
     def set_html_files(self, paths: Sequence[str]):
         """
-        Function:
-          Register available HTML visualisation files and display the first one.
+        Register available HTML visualisation files and display the first one.
 
         Arguments:
           paths (Sequence[str]): List of file paths to HTML visualisations.
@@ -100,8 +97,7 @@ class VisualisationController(QObject):
 
     def display_html(self, index: int):
         """
-        Function:
-          Embed the HTML file at the given index into the visualisation panel.
+        Embed the HTML file at the given index into the visualisation panel.
 
         Arguments:
           index (int): Zero-based index into `self.html_files`.
@@ -120,8 +116,7 @@ class VisualisationController(QObject):
 
     def open_current_external(self):
         """
-        Function:
-          Open the currently displayed HTML in the system’s default web browser.
+        Open the currently displayed HTML in the system’s default web browser.
 
         Example:
           Function itself returns None; example shows that return value is None.
@@ -160,8 +155,7 @@ class VisualisationController(QObject):
     # ------------------------------------------------------------------
     def bind_open_button(self, button: QPushButton):
         """
-        Function:
-          Connect an *Open* button to open the current visualisation externally.
+        Connect an *Open* button to open the current visualisation externally.
 
         Arguments:
           button (QPushButton): The push button to connect to the handler.
@@ -175,8 +169,7 @@ class VisualisationController(QObject):
 
     def bind_selector(self, combo: QComboBox):
         """
-        Function:
-          Bind a QComboBox selector to manage and display HTML visualisations.
+        Bind a QComboBox selector to manage and display HTML visualisations.
 
         Arguments:
           combo (QComboBox): The combo box used as selector.
@@ -198,8 +191,7 @@ class VisualisationController(QObject):
 
     def _refresh_selector(self):
         """
-        Function:
-          Populate the selector combo box with available HTML files.
+        Populate the selector combo box with available HTML files.
 
         Example (Optional):
           # Function itself returns None; example shows refresh success.
@@ -218,8 +210,7 @@ class VisualisationController(QObject):
 
     def _embed_html(self, file_path: str):
         """
-        Function:
-          Embed an HTML file inside the QTextEdit container using QWebEngineView.
+        Embed an HTML file inside the QTextEdit container using QWebEngineView.
 
         Arguments:
           file_path (str): Absolute or relative path to a local HTML file to display.
@@ -255,8 +246,7 @@ class VisualisationController(QObject):
     # ------------------------------------------------------------------
     def set_external_base_url(self, url: str):
         """
-        Function:
-          Set a base HTTP URL to prefer when opening visualisations externally.
+        Set a base HTTP URL to prefer when opening visualisations externally.
 
         Arguments:
           url (str): Base URL (a trailing slash is appended if missing).
@@ -273,8 +263,7 @@ class VisualisationController(QObject):
 
     def build_from_execution(self):
         """
-        Function:
-          Generate visualisation HTML files from the execution model and load them.
+        Generate visualisation HTML files from the execution model and load them.
 
         Example:
           Function itself returns None; example checks that call succeeds.
@@ -304,11 +293,10 @@ class VisualisationController(QObject):
     
     def _find_existing_html_files(self):
         """
-        Function:
-          Locate and return paths of existing visualisation HTML files.
+        Locate and return paths of existing visualisation HTML files.
 
         Returns:
-          list[str]: A list of absolute paths to discovered HTML files.
+          list[str]: A list of absolute paths to discovered HTML files.git
 
         Example:
           Function returns a list; example checks returned type.
