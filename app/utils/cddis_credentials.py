@@ -48,12 +48,6 @@ def _write_text_secure(p: Path, content: str) -> None:
     Arguments:
       p (Path): Target file path.
       content (str): File content to write (UTF-8).
-
-    Returns:
-      None
-
-    Example (Optional):
-      >>> from pathlib import Path  # smoke test only
     """
     p.write_text(content, encoding="utf-8")
     if not platform.system().lower().startswith("win"):
@@ -89,15 +83,6 @@ def save_earthdata_credentials(username: str, password: str) -> tuple[Path, ...]
 def _ensure_windows_mirror() -> None:
     """
     Ensure .netrc exists by mirroring _netrc on Windows if necessary.
-
-    Arguments:
-      None
-
-    Returns:
-      None
-
-    Example (Optional):
-      >>> _ensure_windows_mirror()  # no-op on non-Windows
     """
     if not platform.system().lower().startswith("win"):
         return
