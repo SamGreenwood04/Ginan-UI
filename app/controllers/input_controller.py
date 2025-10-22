@@ -57,12 +57,6 @@ class InputController(QObject):
           ui (Any): Main window UI instance (generated from Qt .ui).
           parent_window (Any): Parent widget/window to anchor dialogs.
           execution (Execution): Backend execution bridge used to read/apply UI config.
-
-        Returns:
-          None
-
-        Example (Optional):
-          >>> # ctrl = InputController(ui, main_window, execution)
         """
         super().__init__()
         self.ui = ui
@@ -442,11 +436,6 @@ class InputController(QObject):
         Arguments:
           constellation_str (str): Comma-separated constellations (e.g., "GPS, GAL, GLO").
 
-        Returns:
-          None
-
-        Example (Optional):
-          >>> # ctrl._update_constellations_multiselect("GPS, GAL")
         """
         from PySide6.QtGui import QStandardItemModel, QStandardItem
 
@@ -592,12 +581,6 @@ class InputController(QObject):
 
         Arguments:
           selected_series (str): Series code, e.g., 'ULT', 'RAP', 'FIN'.
-
-        Returns:
-          None
-
-        Example (Optional):
-          >>> # ctrl._on_ppp_series_changed("FIN")
         """
         if not hasattr(self, "_valid_project_series_df"):
             return
@@ -1036,8 +1019,6 @@ class InputController(QObject):
         Returns:
           ExtractedInputs: Dataclass containing parsed fields and raw strings.
 
-        Example (Optional):
-          >>> # inputs = ctrl.extract_ui_values("/path/to/file.rnx")
         """
         # Extract user input from the UI and assign it to class variables.
         mode_raw           = self.ui.Mode.currentText() if self.ui.Mode.currentText() != "Select one" else "Static"
@@ -1247,8 +1228,6 @@ class InputController(QObject):
         Returns:
           str: Selected file path or empty string.
 
-        Example (Optional):
-          >>> # p = InputController._select_rnx_file(parent)
         """
         path, _ = QFileDialog.getOpenFileName(
             parent, 
@@ -1269,8 +1248,6 @@ class InputController(QObject):
         Returns:
           str: Selected directory path or empty string.
 
-        Example (Optional):
-          >>> # d = InputController._select_output_dir(parent)
         """
         path = QFileDialog.getExistingDirectory(parent, "Select Output Directory")
         return path or ""
@@ -1400,9 +1377,6 @@ class InputController(QObject):
         """
          Provide available processing modes for the UI combo.
 
-         Arguments:
-           None
-
          Returns:
            list[str]: ['Static', 'Kinematic', 'Dynamic']
 
@@ -1433,9 +1407,6 @@ class InputController(QObject):
         """
         Provide available PPP providers from the cached products DataFrame.
 
-        Arguments:
-          None
-
         Returns:
           list[str]: Provider names; empty when products list is not yet available.
 
@@ -1450,9 +1421,6 @@ class InputController(QObject):
     def _get_ppp_series_items() -> List[str]:
         """
          Provide available PPP series codes for the UI combo.
-
-         Arguments:
-           None
 
          Returns:
            list[str]: ['ULT', 'RAP', 'FIN']

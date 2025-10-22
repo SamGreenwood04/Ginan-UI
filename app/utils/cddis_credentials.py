@@ -11,9 +11,6 @@ def _win_user_home() -> Path:
     """
     Return the Windows user home path.
 
-    Arguments:
-      None
-
     Returns:
       Path: Path to the current user's home directory on Windows; falls back to Path.home() if env var is missing.
 
@@ -26,9 +23,6 @@ def _win_user_home() -> Path:
 def netrc_candidates() -> tuple[Path, ...]:
     """
     Return possible credential file paths on this OS.
-
-    Arguments:
-      None
 
     Returns:
       tuple[Path, ...]: Candidate paths to search/write `.netrc`-style credentials. On Windows: (%USERPROFILE%\\.netrc, %USERPROFILE%\\_netrc); on macOS/Linux: (~/.netrc,).

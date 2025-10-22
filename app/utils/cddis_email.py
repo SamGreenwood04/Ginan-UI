@@ -31,9 +31,6 @@ def _pick_netrc() -> Path:
     """
     Select a `.netrc`-style credential file path to use.
 
-    Arguments:
-      None
-
     Returns:
       Path: Resolved path to the preferred credential file.
 
@@ -65,9 +62,6 @@ def _pick_netrc() -> Path:
 def read_email() -> str | None:
     """
     Read the EMAIL used by CDDIS utilities.
-
-    Arguments:
-      None
 
     Returns:
       str | None: EMAIL value if found. Lookup order: env var EMAIL → CDDIS.env → None.
@@ -168,9 +162,6 @@ def ensure_email_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tupl
 def get_netrc_auth() -> tuple[str, str] | None:
     """
     Retrieve (username, password) from `.netrc/_netrc` for Earthdata auth.
-
-    Arguments:
-      None
 
     Returns:
       tuple[str, str] | None: (username, password) if found; otherwise None.
