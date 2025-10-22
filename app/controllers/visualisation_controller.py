@@ -34,22 +34,34 @@ class VisualisationController(QObject):
     Function:
       Manage interactions and rendering inside the visualisation panel.
 
-    Example:
-      >>> controller = VisualisationController(ui, parent)
-      >>> controller.set_html_files(["plot.html"])
+    Arguments:
+      ui (object): The main window UI object that exposes the visualisation widgets (e.g., `visualisationTextEdit`).
+      parent_window (QObject): The parent window/controller used as the QObject parent.
+
+    Returns:
+      None: Constructor returns nothing.
+
+    Example (Optional):
+      Function itself returns None; example shows how to instantiate and inspect state.
+      >>> controller = VisualisationController(ui, parent_window)
+      >>> controller.html_files
+      []
     """
     
     def __init__(self, ui, parent_window):
         """
         Function:
-          Initialize the visualisation controller.
+          Initialize controller state and install required event filters.
 
         Arguments:
           ui: The main window UI instance.
           parent_window: The parent QMainWindow or controller.
-
+        
         Example:
-          >>> ctrl = VisualisationController(ui, main_window)
+          Function itself returns None; example shows initial empty html_files.
+          >>> ctrl = VisualisationController(ui, parent_window)
+          >>> ctrl.html_files
+          []
         """
         super().__init__(parent_window)
         self.ui = ui  # Ui_MainWindow instance
@@ -74,7 +86,10 @@ class VisualisationController(QObject):
           paths (Sequence[str]): List of file paths to HTML visualisations.
 
         Example:
+          Function itself returns None; example shows state update after call.
           >>> controller.set_html_files(["plot1.html", "plot2.html"])
+          >>> controller.current_index
+          0
         """
         self.html_files = list(paths)
         # Refresh selector if bound
@@ -86,13 +101,16 @@ class VisualisationController(QObject):
     def display_html(self, index: int):
         """
         Function:
-          Display the specified HTML file within the QTextEdit area.
+          Embed the HTML file at the given index into the visualisation panel.
 
         Arguments:
-          index (int): Index of the file to embed from the html_files list.
+          index (int): Zero-based index into `self.html_files`.
 
         Example:
+          Function itself returns None; example shows updated index.
           >>> controller.display_html(0)
+          >>> controller.current_index
+          0
         """
         if not isinstance(index, int) or not (0 <= index < len(self.html_files)):
             return
@@ -106,7 +124,9 @@ class VisualisationController(QObject):
           Open the currently displayed HTML in the system’s default web browser.
 
         Example:
-          >>> controller.open_current_external()
+          Function itself returns None; example shows that return value is None.
+          >>> controller.open_current_external() is None
+          True
         """
         if self.current_index is None:
             return
@@ -144,10 +164,12 @@ class VisualisationController(QObject):
           Connect an *Open* button to open the current visualisation externally.
 
         Arguments:
-          button (QPushButton): The button to connect.
+          button (QPushButton): The push button to connect to the handler.
 
         Example:
-          >>> controller.bind_open_button(ui.openButton)
+          Function itself returns None; example shows valid binding.
+          >>> controller.bind_open_button(ui.openButton) is None
+          True
         """
         button.clicked.connect(self.open_current_external)
 
@@ -160,7 +182,9 @@ class VisualisationController(QObject):
           combo (QComboBox): The combo box used as selector.
 
         Example:
-          >>> controller.bind_selector(ui.comboBox)
+          Function itself returns None; example shows valid selector binding.
+          >>> controller.bind_selector(ui.comboBox) is None
+          True
         """
         self._selector = combo
 
@@ -176,6 +200,11 @@ class VisualisationController(QObject):
         """
         Function:
           Populate the selector combo box with available HTML files.
+
+        Example (Optional):
+          # Function itself returns None; example shows refresh success.
+          >>> controller._refresh_selector() is None
+          True
         """
         if not self._selector:
             return
@@ -193,10 +222,13 @@ class VisualisationController(QObject):
           Embed an HTML file inside the QTextEdit container using QWebEngineView.
 
         Arguments:
-          file_path (str): Local path to the HTML file.
+          file_path (str): Absolute or relative path to a local HTML file to display.
 
         Example:
+          Function itself returns None; example verifies _webview creation.
           >>> controller._embed_html("visual.html")
+          >>> hasattr(controller, "_webview")
+          True
         """
         container: QTextEdit = self.ui.visualisationTextEdit
         # Clean previous webviews
@@ -224,13 +256,16 @@ class VisualisationController(QObject):
     def set_external_base_url(self, url: str):
         """
         Function:
-          Define a base HTTP URL for opening HTML files externally via web links.
+          Set a base HTTP URL to prefer when opening visualisations externally.
 
         Arguments:
-          url (str): The base URL (must end with '/').
+          url (str): Base URL (a trailing slash is appended if missing).
 
         Example:
+          Function itself returns None; example shows URL assignment.
           >>> controller.set_external_base_url("http://localhost:8000/")
+          >>> controller.external_base_url
+          'http://localhost:8000/'
         """
         if not url.endswith('/'):
             url += '/'
@@ -239,13 +274,12 @@ class VisualisationController(QObject):
     def build_from_execution(self):
         """
         Function:
-          Generate and load visualisation HTMLs from the execution model.
-
-        Raises:
-          Exception: If generation or file merging fails.
+          Generate visualisation HTML files from the execution model and load them.
 
         Example:
-          >>> controller.build_from_execution()
+          Function itself returns None; example checks that call succeeds.
+          >>> controller.build_from_execution() is None
+          True
         """
         try:
             exec_obj = getattr(self.parent, "execution", None)
@@ -274,10 +308,12 @@ class VisualisationController(QObject):
           Locate and return paths of existing visualisation HTML files.
 
         Returns:
-          list[str]: List of existing HTML file paths.
+          list[str]: A list of absolute paths to discovered HTML files.
 
         Example:
-          >>> controller._find_existing_html_files()
+          Function returns a list; example checks returned type.
+          >>> isinstance(controller._find_existing_html_files(), list)
+          True
         """
         existing_files = []
 
