@@ -14,7 +14,15 @@ from app.utils.yaml import load_yaml, write_yaml, normalise_yaml_value
 from app.utils.plot_pos import plot_pos_files
 from app.utils.common_dirs import GENERATED_YAML, TEMPLATE_PATH, INPUT_PRODUCTS_PATH
 
+
 def get_pea_exec():
+    """
+    Checks system platform and returns a Path to the respective executable. Also searches for "pea" on PATH.
+
+    :return: Path to executable or str of PATH callable
+    :raises RuntimeError: Windows without "pea" on PATH or unsupported platform. No verification that "pea" is actually
+    ginan-pea executable is performed.
+    """
     # AppImage works natively
     if platform.system().lower() == "linux":
         executable = files('app.resources').joinpath('ginan.AppImage')
@@ -35,12 +43,18 @@ def get_pea_exec():
 
     return executable
 
+
 class Execution:
-    def __init__(self, config_path: Path=GENERATED_YAML):
+    def __init__(self, config_path: Path = GENERATED_YAML):
+        """
+        Caches config changes, interacts with config file, and finally can call pea executable.
+
+        :param config_path: Path to a config file, defaulted to GENERATED_YAML
+        """
         self.config_path = config_path
-        self.executable = get_pea_exec() # the PEA executable
-        self.changes = False # Flag to track if config has been changed
-        self._procs = []  
+        self.executable = get_pea_exec()  # the PEA executable
+        self.changes = False  # Flag to track if config has been changed
+        self._procs = []
         self._stop_event = threading.Event()
 
         template_file = Path(TEMPLATE_PATH)
@@ -60,6 +74,8 @@ class Execution:
         """
         Force reload of the YAML config from disk into memory.
         This allows any manual edits to be picked up before GUI changes are applied.
+
+        :raises RuntimeError: Any error occurred during load_yaml(config_path)
         """
         try:
             self.config = load_yaml(self.config_path)
@@ -76,7 +92,7 @@ class Execution:
         :param add_field: Whether to add the field if it doesn't exist
         :raises KeyError if path doesn't exist and add_field is False
         """
-        self.changes = True # Mark config as changed
+        self.changes = True  # Mark config as changed
         keys = key_path.split(".")
         node = self.config
 
@@ -103,6 +119,11 @@ class Execution:
         node[final_key] = value
 
     def apply_ui_config(self, inputs):
+        """
+        Applies UI settings to **cached** config. **Call write_cached_changes()** to write them.
+
+        :param inputs:
+        """
         print("✅ apply_ui_config was called")
         print("[DEBUG] apply_ui_config: rnx_inputs =", inputs.rnx_path, "| type =", type(inputs.rnx_path))
         self.changes = True
@@ -142,7 +163,8 @@ class Execution:
         self.edit_config("processing_options.epoch_control.epoch_interval", inputs.epoch_interval, False)
         self.edit_config(f"receiver_options.{inputs.marker_name}.receiver_type", inputs.receiver_type, True)
         self.edit_config(f"receiver_options.{inputs.marker_name}.antenna_type", inputs.antenna_type, True)
-        self.edit_config(f"receiver_options.{inputs.marker_name}.models.eccentricity.offset", inputs.antenna_offset, True)
+        self.edit_config(f"receiver_options.{inputs.marker_name}.models.eccentricity.offset", inputs.antenna_offset,
+                         True)
 
         # Always format process_noise as a list
         self.edit_config("estimation_parameters.receivers.global.pos.process_noise", [inputs.mode], False)
@@ -151,7 +173,7 @@ class Execution:
         all_constellations = ["gps", "gal", "glo", "bds", "qzs"]
         for const in all_constellations:
             self.edit_config(f"processing_options.gnss_general.sys_options.{const}.process", False, False)
-        
+
         # Then enable only the selected constellations
         if inputs.constellations_raw:
             selected = [c.strip().lower() for c in inputs.constellations_raw.split(",") if c.strip()]
@@ -164,6 +186,9 @@ class Execution:
         self.changes = False
 
     def execute_config(self):
+        """
+        If changes were made since last write, writes config, then executes pea with config.
+        """
         # clear stop flag before each run
         self.reset_stop_flag()
 
@@ -209,6 +234,7 @@ class Execution:
             self._procs = [proc for proc in self._procs if proc.poll() is None]
 
         # unified process spawning: use independent process groups, for easy kill (macOS/Linux)
+
     def spawn_process(self, args, cwd=None, env=None) -> subprocess.Popen:
         p = subprocess.Popen(
             args,
@@ -217,7 +243,7 @@ class Execution:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            start_new_session=True,   # critical: new session = new process group
+            start_new_session=True,  # critical: new session = new process group
         )
         self._procs.append(p)
         return p
@@ -246,7 +272,6 @@ class Execution:
 
     def reset_stop_flag(self):
         self._stop_event.clear()
-
 
     def build_pos_plots(self, out_dir=None):
         """

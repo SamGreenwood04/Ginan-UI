@@ -103,8 +103,7 @@ class DownloadWorker(QObject):
         elif self.products.empty:
             self.log.emit("[PPPDownloadWorker] Checking pre-processing metadata installed")
             try:
-                download_metadata(self.download_dir, _log_cb, self.progress.emit, self.start_epoch, self.end_epoch,
-                                  self.atx_downloaded.emit)
+                download_metadata(self.download_dir, _log_cb, self.progress.emit, self.atx_downloaded.emit)
             except Exception as e:
                 tb = traceback.format_exc()
                 self.log.emit(f"[PPPDownloadWorker] Error whilst downloading metadata:\n{tb}")
