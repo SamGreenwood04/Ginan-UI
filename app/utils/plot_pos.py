@@ -18,7 +18,7 @@ def parse_pos_format(file_path):
       pandas.DataFrame: Table with columns such as 'Time', 'Latitude', 'Longitude',
       'Elevation', 'dN', 'dE', 'dU', 'sN', 'sE', 'sU', 'sElevation', 'Rne', 'Rnu', 'Reu', 'soln'.
 
-    Example (Optional):
+    Example:
       >>> df = parse_pos_format("sample.POS")  # doctest: +SKIP
       >>> isinstance(df, pd.DataFrame)  # doctest: +SKIP
       True
@@ -67,7 +67,7 @@ def parse_datetime(datetime_str):
     Returns:
       datetime: Timezone-naive datetime object. If timezone was present, it is stripped.
 
-    Example (Optional):
+    Example:
       >>> parse_datetime("2025-01-01T00:00:00")  # doctest: +SKIP
     """
     # Attempt to parse datetime with and without timezone
@@ -113,7 +113,7 @@ def apply_smoothing(data, horz_smoothing=None, vert_smoothing=None):
     Returns:
       pandas.DataFrame: DataFrame with additional 'Smoothed_*' columns when smoothing is applied.
 
-    Example (Optional):
+    Example:
       >>> apply_smoothing(df, horz_smoothing=0.1)  # doctest: +SKIP
     """
     for component in ['dN', 'dE', 'dU', 'Elevation']:
@@ -134,7 +134,7 @@ def compute_statistics(data):
       tuple[pandas.DataFrame, dict]: (data_with_helper_columns, stats_dict) where stats_dict maps
       component -> {'weighted_mean', 'std_dev', 'rms'}.
 
-    Example (Optional):
+    Example:
       >>> data, stats = compute_statistics(df)  # doctest: +SKIP
     """
     stats = {}
@@ -173,7 +173,7 @@ def create_plots(all_data, input_files, component_stats, args):
     Returns:
       None: Writes HTML files when args.save_prefix is provided; otherwise keeps figures in memory.
 
-    Example (Optional):
+    Example:
       >>> # create_plots(df, ["site.POS"], stats, SimpleNamespace(colour_sigma=False, save_prefix="./out/fig"))  # doctest: +SKIP
     """
     input_root = Path(input_files[0]).stem
@@ -514,7 +514,7 @@ def run_plot_pos(file_path, output_html="pos_plot.html"):
     Returns:
       str: The output_html string passed in.
 
-    Example (Optional):
+    Example:
       >>> run_plot_pos("sample.POS", "pos_plot.html")
       'pos_plot.html'
     """
@@ -550,7 +550,7 @@ def plot_pos_files(input_files, start_datetime=None, end_datetime=None,
        Returns:
          list[str]: Paths to generated HTML files when save_prefix is provided; empty list if save_prefix is None.
 
-       Example (Optional):
+       Example:
          >>> files = ["./A.POS", "./B.POS"]  # doctest: +SKIP
          >>> out = plot_pos_files(files, start_datetime="2025-01-01T00:00:00", colour_sigma=False, save_prefix="./out/fig")  # doctest: +SKIP
          >>> isinstance(out, list)  # doctest: +SKIP

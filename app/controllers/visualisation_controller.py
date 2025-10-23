@@ -40,7 +40,7 @@ class VisualisationController(QObject):
     Returns:
       None: Constructor returns nothing.
 
-    Example (Optional):
+    Example:
       Function itself returns None; example shows how to instantiate and inspect state.
       >>> controller = VisualisationController(ui, parent_window)
       >>> controller.html_files
@@ -193,7 +193,7 @@ class VisualisationController(QObject):
         """
         Populate the selector combo box with available HTML files.
 
-        Example (Optional):
+        Example:
           # Function itself returns None; example shows refresh success.
           >>> controller._refresh_selector() is None
           True

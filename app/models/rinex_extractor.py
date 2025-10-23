@@ -24,6 +24,18 @@ class RinexExtractor:
         found_constellations = set()
 
         def format_time(year, month, day, hour, minute, second):
+            """
+            Helper function to format the parameters into a usable time string for RNX extraction
+
+            :param year: The year
+            :param month: The month
+            :param day: The day
+            :param hour: The hour
+            :param minute: The minute
+            :param second: The second
+            :returns: Formatting string in format: "[YEAR]-[MONTH]-[DAY]_[HOUR]:[MIN}:[SEC]"
+                      i.e. "2000-10-27_16:57:49"
+            """
             return f"{year:04d}-{month:02d}-{day:02d}_{hour:02d}:{minute:02d}:{(int(second)):02d}"
 
         # Iterate through each line of the .RNX file

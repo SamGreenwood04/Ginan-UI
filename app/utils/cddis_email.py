@@ -34,7 +34,7 @@ def _pick_netrc() -> Path:
     Returns:
       Path: Resolved path to the preferred credential file.
 
-    Example (Optional):
+    Example:
       >>> isinstance(_pick_netrc(), Path)
       True
     """
@@ -66,7 +66,7 @@ def read_email() -> str | None:
     Returns:
       str | None: EMAIL value if found. Lookup order: env var EMAIL → CDDIS.env → None.
 
-    Example (Optional):
+    Example:
       >>> os.environ.pop("EMAIL", None)
       >>> _ = ENV_FILE.write_text('EMAIL="user@example.com"\\n', encoding="utf-8")
       >>> read_email()
@@ -95,7 +95,7 @@ def write_email(email: str) -> Path:
     Returns:
       Path: Path to the written CDDIS.env file.
 
-    Example (Optional):
+    Example:
       >>> p = write_email("user@example.com")
       >>> p.exists()
       True
@@ -117,7 +117,7 @@ def get_username_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tupl
     Returns:
       tuple[bool, str]: (True, username) if found; otherwise (False, reason).
 
-    Example (Optional):
+    Example:
       >>> ok, val = get_username_from_netrc()  # doctest: +SKIP
       >>> ok in (True, False)
       True
@@ -144,7 +144,7 @@ def ensure_email_from_netrc(prefer_host: str = "urs.earthdata.nasa.gov") -> Tupl
     Returns:
       tuple[bool, str]: (True, email) if resolved; otherwise (False, reason).
 
-    Example (Optional):
+    Example:
       >>> ok, email = ensure_email_from_netrc()  # doctest: +SKIP
       >>> ok in (True, False)
       True
@@ -166,7 +166,7 @@ def get_netrc_auth() -> tuple[str, str] | None:
     Returns:
       tuple[str, str] | None: (username, password) if found; otherwise None.
 
-    Example (Optional):
+    Example:
       >>> creds = get_netrc_auth()  # doctest: +SKIP
       >>> creds is None or isinstance(creds, tuple)
       True
@@ -191,7 +191,7 @@ def test_cddis_connection(timeout: int = 15) -> tuple[bool, str]:
     Returns:
       tuple[bool, str]: (True, 'AUTH OK, took X.XXX seconds') on success; otherwise (False, reason).
 
-    Example (Optional):
+    Example:
       >>> ok, msg = test_cddis_connection()  # doctest: +SKIP
       >>> ok in (True, False)
       True

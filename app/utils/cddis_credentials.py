@@ -14,7 +14,7 @@ def _win_user_home() -> Path:
     Returns:
       Path: Path to the current user's home directory on Windows; falls back to Path.home() if env var is missing.
 
-    Example (Optional):
+    Example:
       >>> isinstance(_win_user_home(), Path)
       True
     """
@@ -27,7 +27,7 @@ def netrc_candidates() -> tuple[Path, ...]:
     Returns:
       tuple[Path, ...]: Candidate paths to search/write `.netrc`-style credentials. On Windows: (%USERPROFILE%\\.netrc, %USERPROFILE%\\_netrc); on macOS/Linux: (~/.netrc,).
 
-    Example (Optional):
+    Example:
       >>> tuple(map(lambda p: p.name, netrc_candidates()))  # doctest: +ELLIPSIS
       ('...netrc',) or ('...netrc', '_netrc')
     """
@@ -58,7 +58,7 @@ def save_earthdata_credentials(username: str, password: str) -> tuple[Path, ...]
     Returns:
       tuple[Path, ...]: The list of credential files written. Also sets environment variable NETRC to the preferred file.
 
-    Example (Optional):
+    Example:
       >>> paths = save_earthdata_credentials("user", "pass")  # doctest: +SKIP
       >>> len(paths) >= 1
       True
@@ -97,7 +97,7 @@ def validate_netrc(required=(URS, CDDIS)) -> tuple[bool, str]:
     Returns:
       tuple[bool, str]: If valid, (True, path-to-netrc). If invalid, (False, reason).
 
-    Example (Optional):
+    Example:
       >>> ok, info = validate_netrc()  # doctest: +SKIP
       >>> ok in (True, False)
       True

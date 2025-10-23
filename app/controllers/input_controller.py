@@ -982,33 +982,6 @@ class InputController(QObject):
 
     #region Config and PEA Processing
 
-    def _generate_modified_config_yaml(self, config_parameters):
-        """
-        Args:
-            config_parameters (dict): modified config parameters directory
-                example: {
-                    'setting1': 'value1',
-                    'setting2': 'value2',
-                    'nested_config': {
-                        'subsetting1': 'subvalue1'
-                    }
-                }
-
-        Returns:
-            str: generated YAML file path, should return the path in the format of /resources/Yaml/xxxx.yaml
-
-        TODO: backend please implement the following functions:
-        1. receive config_parameters parameter
-        2. convert the parameters to YAML format
-        3. save to /resources/Yaml/ directory
-        4. file name format can be: timestamp.yaml, config_v1.yaml, etc.
-        5. return the complete file path
-        
-        Note: the current UI version uses the hardcode path /resources/Yaml/default_config.yaml
-        """
-        # TODO: backend please implement functions here.
-        return self.default_config_path
-
     def extract_ui_values(self, rnx_path):
         """
         Extract current UI values, parse/normalize them, and return as dataclass.
@@ -1263,7 +1236,7 @@ class InputController(QObject):
         Returns:
           int: 0 for Static, 30 for Kinematic, 100 for Dynamic.
 
-        Example (Optional):
+        Example:
           >>> determine_mode_value("Static")
           0
         """
@@ -1287,7 +1260,7 @@ class InputController(QObject):
         Returns:
           str: Upper-cased 4-char marker or 'TEST' when not found.
 
-        Example (Optional):
+        Example:
           >>> extract_marker_name("ALIC00AUS_R_20250190000_01D_30S_MO.rnx.gz")
           'ALIC'
         """
@@ -1308,7 +1281,7 @@ class InputController(QObject):
         Returns:
           tuple[str, str]: (start_epoch, end_epoch) with underscores preserved for UI.
 
-        Example (Optional):
+        Example:
           >>> parse_time_window("2025-01-01_00:00:00 to 2025-01-02_00:00:00")
           ('2025-01-01 00:00:00', '2025-01-02 00:00:00')
         """
@@ -1333,7 +1306,7 @@ class InputController(QObject):
         Returns:
           list[float]: [e, n, u] in metres.
 
-        Example (Optional):
+        Example:
           >>> parse_antenna_offset("0.1, -0.2, 1.0")
           [0.1, -0.2, 1.0]
         """
@@ -1380,7 +1353,7 @@ class InputController(QObject):
          Returns:
            list[str]: ['Static', 'Kinematic', 'Dynamic']
 
-         Example (Optional):
+         Example:
            >>> InputController._get_mode_items()
            ['Static', 'Kinematic', 'Dynamic']
          """
@@ -1397,7 +1370,7 @@ class InputController(QObject):
         Returns:
           list[str]: ['GPS', 'GAL', 'GLO', 'BDS', 'QZS']
 
-        Example (Optional):
+        Example:
           >>> InputController._get_constellations_items()
           ['GPS', 'GAL', 'GLO', 'BDS', 'QZS']
         """
@@ -1410,7 +1383,7 @@ class InputController(QObject):
         Returns:
           list[str]: Provider names; empty when products list is not yet available.
 
-        Example (Optional):
+        Example:
           >>> ctrl._get_ppp_provider_items()
         """
         if hasattr(self, "valid_analysis_centers") and self.valid_analysis_centers:
@@ -1425,7 +1398,7 @@ class InputController(QObject):
          Returns:
            list[str]: ['ULT', 'RAP', 'FIN']
 
-         Example (Optional):
+         Example:
            >>> InputController._get_ppp_series_items()
            ['ULT', 'RAP', 'FIN']
          """
@@ -1492,7 +1465,7 @@ class CredentialsDialog(QDialog):
         self.accept()
 
 
-# ===== Added: minimal unified stop entry for InputController background worker =====
+# Minimal unified stop entry for InputController background worker
 def _safe_call_stop(obj):
     """
     Safely call .stop() on an object if present, ignoring exceptions.
