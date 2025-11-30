@@ -1,5 +1,7 @@
 # Ginan - UI
 
+The newly maintained repository of Ginan-UI
+
 An intelligent user friendly interface for using the Geoscience Australia GNSS processing tool ginan. Made using pyside6 by students of the 2025 ANU Techlauncher program.
 
 [User manual available here](https://drive.google.com/file/d/1ThoVqijgRQ1KV9QfP7m5iflhWILdRoD3/view?usp=drive_link)
